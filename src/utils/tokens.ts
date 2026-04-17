@@ -63,9 +63,9 @@ export function transformTokenReference(collectionName: string, varName: string)
 		const parts = raw.split('/');
 		const firstLower = parts[0].toLowerCase();
 		const secondNorm = parts[1] ? parts[1].replace(/-/g, '').toLowerCase() : '';
-		// typography/fontFamilies/{slug} → --wp--preset--typography--font-family--{slug}
+		// typography/fontFamilies/{slug} → --wp--preset--font-family--{slug}
 		if (firstLower === 'typography' && secondNorm.includes('fontfamil')) {
-			return `var(--wp--preset--typography--font-family--${normalizeCssSegment(parts[parts.length - 1])})`;
+			return `var(--wp--preset--font-family--${normalizeCssSegment(parts[parts.length - 1])})`;
 		}
 		return `var(--wp--custom--${normalizeVarPath(raw)})`;
 	}
