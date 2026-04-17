@@ -35,6 +35,11 @@ export function transformTokenReference(collectionName: string, varName: string)
 	if (col === 'settings [custom]') {
 		// Strip leading "custom/" prefix if present to avoid double-nesting
 		const path = varLower.startsWith('custom/') ? varLower.slice('custom/'.length) : varLower;
+		const parts = path.split('/');
+		// typography/fontFamilies/{slug} → --wp--preset--typography--font-family--{slug}
+		if (parts[0] === 'typography' && parts[1] && parts[1].replace(/-/g, '').includes('fontfamil')) {
+			return `var(--wp--preset--typography--font-family--${parts[parts.length - 1]})`;
+		}
 		return `var(--wp--custom--${path.replace(/\//g, '--')})`;
 	}
 
