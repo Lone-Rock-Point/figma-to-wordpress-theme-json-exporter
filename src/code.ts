@@ -2,7 +2,6 @@ console.clear();
 
 import { ExportOptions } from './types';
 import { exportToJSON } from './export/index';
-import { getAllColorPresets } from './color/index';
 import { applyCssVarSyntaxToVariables } from './utils/figma-variables';
 
 figma.ui.onmessage = async (e) => {
@@ -15,20 +14,6 @@ figma.ui.onmessage = async (e) => {
 			figma.ui.postMessage({
 				type: "EXPORT_RESULT",
 				error: error instanceof Error ? error.message : String(error)
-			});
-		}
-	} else if (e.type === "GET_COLOR_PRESETS") {
-		// Get all available color presets for the UI
-		try {
-			const colorPresets = await getAllColorPresets();
-			figma.ui.postMessage({
-				type: "COLOR_PRESETS_RESULT",
-				colorPresets
-			});
-		} catch (error) {
-			figma.ui.postMessage({
-				type: "COLOR_PRESETS_RESULT",
-				error: error instanceof Error ? error.message : "Failed to get color presets"
 			});
 		}
 	} else if (e.type === "APPLY_CSS_VAR_SYNTAX") {

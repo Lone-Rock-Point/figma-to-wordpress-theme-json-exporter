@@ -1,0 +1,24 @@
+{
+  "permissions": {
+    "allow": [
+      "mcp__plugin_design_figma__get_variable_defs",
+      "mcp__plugin_design_figma__get_metadata",
+      "Bash(npm run *)",
+      "Bash(npx tsc *)",
+      "Bash(node_modules/.bin/tsc --noEmit)",
+      "Bash(npm install *)",
+      "Bash(git add *)",
+      "Bash(git commit -m ' *)",
+      "Bash(git push *)",
+      "Read(//Users/michelleschulp/Documents/Dropbox/WEBSITES/figma-to-wordpress-theme-json-exporter/dist/**)",
+      "Bash(git -C /Users/michelleschulp/Documents/Dropbox/WEBSITES/figma-to-wordpress-theme-json-exporter log --oneline -3)",
+      "Bash(gh auth *)",
+      "Bash(git remote *)",
+      "Bash(ssh-keygen -R github.com)",
+      "Bash(ssh-keyscan -t rsa github.com)",
+      "Bash(gh pr create --base develop --title 'Rewrite export: map Figma collections directly to theme.json sections' --body ' *)",
+      "Bash(gh pr create --base develop --head claude/recursing-satoshi-7da8e8 --repo Lone-Rock-Point/figma-to-wordpress-theme-json-exporter --title 'Rewrite export: map Figma collections directly to theme.json sections' --body ' *)",
+      "Bash(git reset *)"
+    ]
+  }
+}
