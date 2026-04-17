@@ -6,7 +6,10 @@ import { rgbToHex } from '../utils/color';
 // --- Shared helpers ---
 
 function toTitleCase(str: string): string {
-	return str.split(/[-_]+/).map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
+	return str.split(/[-_]+/).map(w => {
+		if (w.toLowerCase() === 'xx') return 'XX';
+		return w.charAt(0).toUpperCase() + w.slice(1);
+	}).join(' ');
 }
 
 function toKebabCase(str: string): string {

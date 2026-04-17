@@ -17,6 +17,20 @@ The plugin reads six named variable collections from your Figma document and map
 | `settings [custom]` | `settings.custom.*` |
 | `styles` | `styles.*` |
 
+## Installation
+
+1. Download the latest release zip from the [releases page](https://github.com/Lone-Rock-Point/figma-to-wordpress-theme-json-exporter/releases) and unzip it
+2. Inside the unzipped folder, run:
+   ```bash
+   npm install
+   npm run build
+   ```
+3. In Figma desktop, go to **Menu > Plugins > Development > Import plugin from manifest...**
+4. Navigate to the unzipped folder and select `manifest.json`
+5. The plugin will appear under **Menu > Plugins > Development** and is ready to use
+
+> **Note:** Re-run `npm run build` and re-import the manifest whenever you update to a newer release.
+
 ## Usage
 
 1. Go to **Menu > Plugins > WordPress Theme.json Export > Export to theme.json**
@@ -28,10 +42,11 @@ The plugin reads six named variable collections from your Figma document and map
 
 ### `settings [color]`
 
-Each variable becomes a color palette entry. Variable aliases are resolved to CSS variable references.
+Each variable becomes a color palette entry. The slug and name come from the **last path segment only**. Variable aliases resolve to CSS variable references.
 
 ```
-primary/500  →  { slug: "primary-500", name: "Primary 500", color: "var(--token--...)" }
+color-palette/primary-dark  →  { slug: "primary-dark", name: "Primary Dark", color: "var(--token--color--blue--70v)" }
+color-palette/translucent   →  { slug: "translucent",   name: "Translucent",  color: "rgba(0, 0, 0, 0.6)" }
 ```
 
 ### `settings [fluid]`
@@ -102,8 +117,6 @@ npm install
 npm run watch   # watch mode
 npm run build   # production build
 ```
-
-After building, point Figma to `manifest.json` via **Plugins > Development > Import plugin from manifest**.
 
 ## Support Level
 
