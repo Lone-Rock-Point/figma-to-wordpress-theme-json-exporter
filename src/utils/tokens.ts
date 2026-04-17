@@ -1,6 +1,20 @@
 import { isVariableAlias } from './index';
 import { rgbToHex } from './color';
 
+// Convert a variable name segment to a CSS var-safe string:
+// spaces → hyphens, camelCase → kebab-case, lowercase
+function normalizeCssSegment(part: string): string {
+	return part
+		.trim()
+		.replace(/\s+/g, '-')
+		.replace(/([A-Z])/g, c => `-${c.toLowerCase()}`)
+		.toLowerCase();
+}
+
+function normalizeVarPath(path: string): string {
+	return path.split('/').map(normalizeCssSegment).join('--');
+}
+
 export function transformTokenReference(collectionName: string, varName: string): string {
 	const col = collectionName.toLowerCase().trim();
 	const varLower = varName.toLowerCase();
@@ -32,15 +46,28 @@ export function transformTokenReference(collectionName: string, varName: string)
 		return `var(--wp--custom--color--${slug})`;
 	}
 
+	if (col === 'settings [static]') {
+		const parts = varName.split('/');
+		const prefix = parts.slice(0, 2).join('/').toLowerCase();
+		const slug = parts[parts.length - 1].toLowerCase();
+		if (prefix === 'border/radius-sizes') {
+			return `var(--wp--preset--border-radius--${slug})`;
+		}
+	}
+
 	if (col === 'settings [custom]') {
 		// Strip leading "custom/" prefix if present to avoid double-nesting
-		const path = varLower.startsWith('custom/') ? varLower.slice('custom/'.length) : varLower;
-		const parts = path.split('/');
+		const raw = varName.startsWith('custom/') || varName.startsWith('Custom/')
+			? varName.slice(varName.indexOf('/') + 1)
+			: varName;
+		const parts = raw.split('/');
+		const firstLower = parts[0].toLowerCase();
+		const secondNorm = parts[1] ? parts[1].replace(/-/g, '').toLowerCase() : '';
 		// typography/fontFamilies/{slug} → --wp--preset--typography--font-family--{slug}
-		if (parts[0] === 'typography' && parts[1] && parts[1].replace(/-/g, '').includes('fontfamil')) {
-			return `var(--wp--preset--typography--font-family--${parts[parts.length - 1]})`;
+		if (firstLower === 'typography' && secondNorm.includes('fontfamil')) {
+			return `var(--wp--preset--typography--font-family--${normalizeCssSegment(parts[parts.length - 1])})`;
 		}
-		return `var(--wp--custom--${path.replace(/\//g, '--')})`;
+		return `var(--wp--custom--${normalizeVarPath(raw)})`;
 	}
 
 	if (col === 'settings [fluid]') {
@@ -55,8 +82,8 @@ export function transformTokenReference(collectionName: string, varName: string)
 		}
 	}
 
-	// Fallback: wp--custom-- reference
-	return `var(--wp--custom--${varLower.replace(/\//g, '--')})`;
+	// Fallback: wp--custom-- reference, normalizing spaces and camelCase
+	return `var(--wp--custom--${normalizeVarPath(varName)})`;
 }
 
 export async function resolveAliasToString(variableId: string, collectionsMap: Map<string, string>): Promise<string | null> {
