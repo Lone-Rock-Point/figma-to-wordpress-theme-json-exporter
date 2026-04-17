@@ -22,8 +22,11 @@ Each variable becomes one palette entry. The entire palette array is replaced on
 
 | Variable | Slug | Name | Color |
 |----------|------|------|-------|
-| `primary/500` | `primary-500` | `Primary 500` | `var(--token--color--primary-500)` |
-| `neutral/white` | `neutral-white` | `Neutral White` | `#ffffff` |
+| `color-palette/primary-dark` | `primary-dark` | `Primary Dark` | `var(--token--color--blue--70v)` |
+| `color-palette/primary` | `primary` | `Primary` | `var(--token--color--blue--60v)` |
+| `color-palette/translucent` | `translucent` | `Translucent` | `rgba(0, 0, 0, 0.6)` |
+
+The slug and name are taken from the **last path segment only** — so `color-palette/primary-dark` produces slug `primary-dark`, not `color-palette-primary-dark`.
 
 **Output:**
 ```json
@@ -31,8 +34,9 @@ Each variable becomes one palette entry. The entire palette array is replaced on
   "settings": {
     "color": {
       "palette": [
-        { "slug": "primary-500", "name": "Primary 500", "color": "var(--token--color--primary-500)" },
-        { "slug": "neutral-white", "name": "Neutral White", "color": "#ffffff" }
+        { "slug": "primary-dark", "name": "Primary Dark", "color": "var(--token--color--blue--70v)" },
+        { "slug": "primary", "name": "Primary", "color": "var(--token--color--blue--60v)" },
+        { "slug": "translucent", "name": "Translucent", "color": "rgba(0, 0, 0, 0.6)" }
       ]
     }
   }
