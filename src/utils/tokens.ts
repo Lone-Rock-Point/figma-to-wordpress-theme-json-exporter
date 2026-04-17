@@ -84,7 +84,14 @@ export function transformTokenReference(collectionName: string, varName: string)
 		}
 	}
 
-	// Fallback: wp--custom-- reference, normalizing spaces and camelCase
+	// Fallback: detect font-family pattern regardless of collection
+	const fbParts = varName.split('/');
+	const fbFirst = fbParts[0].toLowerCase();
+	const fbSecond = fbParts[1] ? fbParts[1].replace(/-/g, '').toLowerCase() : '';
+	if (fbFirst === 'typography' && fbSecond.includes('fontfamil')) {
+		return `var(--wp--preset--font-family--${normalizeCssSegment(fbParts[fbParts.length - 1])})`;
+	}
+
 	return `var(--wp--custom--${normalizeVarPath(varName)})`;
 }
 
