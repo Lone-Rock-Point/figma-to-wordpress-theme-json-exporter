@@ -3,41 +3,46 @@ import { rgbToHex } from './color';
 
 export function transformTokenReference(collectionName: string, varName: string): string {
 	const col = collectionName.toLowerCase().trim();
+	const varLower = varName.toLowerCase();
 
-	if (col.startsWith('!-usa')) {
-		// "!-usa", varName "color/blue/5v" → "var(--token--color--blue-5v)"
-		const parts = varName.split('/');
-		const category = parts[0].toLowerCase();
-		const rest = parts.slice(1).map(p => p.toLowerCase()).join('-');
+	// !-usa: check collection name OR variable name prefix
+	if (col.startsWith('!-usa') || varLower.startsWith('!-usa/')) {
+		const path = varLower.startsWith('!-usa/') ? varLower.slice('!-usa/'.length) : varLower;
+		const parts = path.split('/');
+		const category = parts[0];
+		const rest = parts.slice(1).join('-');
 		return `var(--token--${category}--${rest})`;
 	}
 
-	if (col.startsWith('!-theme')) {
-		// "!-theme-tokens", varName "theme/color/accent" → "var(--theme--color--accent)"
-		const cssPath = varName.toLowerCase().replace(/\//g, '--');
-		return `var(--${cssPath})`;
+	// !-theme: check collection name OR variable name prefix
+	if (col.startsWith('!-theme') || varLower.startsWith('!-theme')) {
+		const path = varLower.replace(/^!-theme[^/]*\//, '').replace(/\//g, '--');
+		return `var(--${path})`;
 	}
 
 	if (col === 'settings [color]') {
-		// → var(--wp--preset--color--{last-segment})
-		const parts = varName.split('/');
-		const slug = parts[parts.length - 1].toLowerCase();
+		const parts = varLower.split('/');
+		const slug = parts[parts.length - 1];
 		return `var(--wp--preset--color--${slug})`;
 	}
 
 	if (col === 'settings [custom color]') {
-		// → var(--wp--custom--color--{last-segment})
-		const parts = varName.split('/');
-		const slug = parts[parts.length - 1].toLowerCase();
+		const parts = varLower.split('/');
+		const slug = parts[parts.length - 1];
 		return `var(--wp--custom--color--${slug})`;
 	}
 
+	if (col === 'settings [custom]') {
+		// Strip leading "custom/" prefix if present to avoid double-nesting
+		const path = varLower.startsWith('custom/') ? varLower.slice('custom/'.length) : varLower;
+		return `var(--wp--custom--${path.replace(/\//g, '--')})`;
+	}
+
 	if (col === 'settings [fluid]') {
-		// Font size or spacing preset depending on first path segment
-		const parts = varName.split('/');
-		const group = parts[0].toLowerCase();
-		const slug = parts[parts.length - 1].toLowerCase();
-		if (group.includes('font') || group.includes('type')) {
+		const parts = varLower.split('/');
+		const group = parts[0];
+		const slug = parts[parts.length - 1];
+		if (group.includes('font') || group.includes('type') || group === 'typography') {
 			return `var(--wp--preset--font-size--${slug})`;
 		}
 		if (group.includes('spacing') || group.includes('space')) {
@@ -46,7 +51,7 @@ export function transformTokenReference(collectionName: string, varName: string)
 	}
 
 	// Fallback: wp--custom-- reference
-	return `var(--wp--custom--${varName.toLowerCase().replace(/\//g, '--')})`;
+	return `var(--wp--custom--${varLower.replace(/\//g, '--')})`;
 }
 
 export async function resolveAliasToString(variableId: string, collectionsMap: Map<string, string>): Promise<string | null> {

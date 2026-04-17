@@ -9,6 +9,10 @@ function toTitleCase(str: string): string {
 	return str.split(/[-_]+/).map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
 }
 
+function toKebabCase(str: string): string {
+	return str.replace(/([A-Z])/g, c => `-${c.toLowerCase()}`).toLowerCase();
+}
+
 function setNestedValue(obj: Record<string, any>, path: string[], value: any): void {
 	if (path.length === 0) return;
 	if (path.length === 1) { obj[path[0]] = value; return; }
@@ -18,7 +22,7 @@ function setNestedValue(obj: Record<string, any>, path: string[], value: any): v
 }
 
 function shouldSkip(name: string): boolean {
-	return name.split('/').some(p => p.startsWith('*'));
+	return name.split('/').some(p => p.includes('*'));
 }
 
 // --- settings [color] → settings.color.palette ---
@@ -86,7 +90,7 @@ async function handleFluidCollection(collection: any, theme: any): Promise<void>
 		const desktopVal = valuesByMode[desktopMode.modeId];
 		if (typeof desktopVal !== 'number') continue;
 
-		const isTypography = group.includes('font') || group.includes('type');
+		const isTypography = group.includes('font') || group.includes('type') || group === 'typography';
 		const isSpacing = group.includes('spacing') || group.includes('space');
 
 		if (isTypography && mobileMode) {
@@ -197,9 +201,9 @@ async function handleStaticCollection(collection: any, theme: any, collectionsMa
 			}
 			if (resolvedVal === null) continue;
 
-			// Use raw lowercased path segments (preserve kebab-case as-is)
-			const category = nameParts[0].toLowerCase();
-			const key = nameParts[1].toLowerCase();
+			// Convert camelCase to kebab-case
+			const category = toKebabCase(nameParts[0]);
+			const key = toKebabCase(nameParts[1]);
 			theme.settings = theme.settings || {};
 			theme.settings[category] = theme.settings[category] || {};
 			theme.settings[category][key] = resolvedVal;
@@ -232,7 +236,10 @@ async function handleCustomCollection(collection: any, theme: any, collectionsMa
 
 		theme.settings = theme.settings || {};
 		theme.settings.custom = theme.settings.custom || {};
-		setNestedValue(theme.settings.custom, name.split('/'), resolved);
+		// Strip leading "custom/" segment to avoid settings.custom.custom double-nesting
+		const pathParts = name.split('/');
+		const strippedPath = pathParts[0].toLowerCase() === 'custom' ? pathParts.slice(1) : pathParts;
+		setNestedValue(theme.settings.custom, strippedPath, resolved);
 	}
 }
 
