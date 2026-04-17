@@ -120,11 +120,11 @@ async function handleFluidCollection(collection: any, theme: any): Promise<void>
 	theme.settings = theme.settings || {};
 	if (fontSizes.length > 0) {
 		theme.settings.typography = theme.settings.typography || {};
-		theme.settings.typography['font-sizes'] = fontSizes;
+		theme.settings.typography.fontSizes = fontSizes;
 	}
 	if (spacingSizes.length > 0) {
 		theme.settings.spacing = theme.settings.spacing || {};
-		theme.settings.spacing['spacing-sizes'] = spacingSizes;
+		theme.settings.spacing.spacingSizes = spacingSizes;
 	}
 }
 
@@ -140,12 +140,12 @@ const ASPECT_RATIO_NAMES: Record<string, string> = {
 
 const ARRAY_SETTINGS: Record<string, { settingsPath: string[]; valueKey: string; formatValue?: (v: any) => string }> = {
 	'border/radius-sizes': {
-		settingsPath: ['border', 'radius-sizes'],
+		settingsPath: ['border', 'radiusSizes'],
 		valueKey: 'size',
 		formatValue: (v: number) => `${v}px`,
 	},
 	'dimensions/aspect-ratios': {
-		settingsPath: ['dimensions', 'aspect-ratios'],
+		settingsPath: ['dimensions', 'aspectRatios'],
 		valueKey: 'ratio',
 	},
 	'shadow/presets': {
