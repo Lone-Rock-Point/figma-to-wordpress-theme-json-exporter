@@ -9,16 +9,16 @@ function toTitleCase(str: string): string {
 	return str.split(/[-_]+/).map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
 }
 
-function toCamelCase(str: string): string {
-	return str.replace(/-([a-z0-9])/g, (_, c) => c.toUpperCase());
-}
-
 function setNestedValue(obj: Record<string, any>, path: string[], value: any): void {
 	if (path.length === 0) return;
 	if (path.length === 1) { obj[path[0]] = value; return; }
 	const key = path[0];
 	if (!obj[key] || typeof obj[key] !== 'object' || Array.isArray(obj[key])) obj[key] = {};
 	setNestedValue(obj[key], path.slice(1), value);
+}
+
+function shouldSkip(name: string): boolean {
+	return name.split('/').some(p => p.startsWith('*'));
 }
 
 // --- settings [color] → settings.color.palette ---
@@ -31,12 +31,15 @@ async function handleColorCollection(collection: any, theme: any, collectionsMap
 		const variable = await figma.variables.getVariableByIdAsync(variableId);
 		if (!variable) continue;
 		const { name, resolvedType, valuesByMode } = variable;
+		if (shouldSkip(name)) continue;
 		const value = valuesByMode[mode.modeId];
 		if (value === undefined) continue;
 
+		// Use only the last path segment for slug and name
 		const nameParts = name.split('/');
-		const slug = nameParts.map(p => p.toLowerCase()).join('-');
-		const displayName = nameParts.map(p => toTitleCase(p)).join(' ');
+		const lastPart = nameParts[nameParts.length - 1];
+		const slug = lastPart.toLowerCase();
+		const displayName = toTitleCase(lastPart);
 
 		let color: string | null = null;
 		if (isVariableAlias(value)) {
@@ -57,7 +60,7 @@ async function handleColorCollection(collection: any, theme: any, collectionsMap
 	}
 }
 
-// --- settings [fluid] → settings.typography.fontSizes + settings.spacing.spacingSizes ---
+// --- settings [fluid] → settings.typography.font-sizes + settings.spacing.spacing-sizes ---
 
 async function handleFluidCollection(collection: any, theme: any): Promise<void> {
 	const desktopMode = collection.modes.find((m: any) => m.name.toLowerCase() === 'desktop');
@@ -73,6 +76,7 @@ async function handleFluidCollection(collection: any, theme: any): Promise<void>
 		const variable = await figma.variables.getVariableByIdAsync(variableId);
 		if (!variable) continue;
 		const { name, resolvedType, valuesByMode } = variable;
+		if (shouldSkip(name)) continue;
 		if (resolvedType !== 'FLOAT') continue;
 
 		const nameParts = name.split('/');
@@ -100,7 +104,7 @@ async function handleFluidCollection(collection: any, theme: any): Promise<void>
 			const rem = Math.round((desktopVal / 16) * 10000) / 10000;
 			spacingSizes.push({
 				slug: lastPart.toLowerCase(),
-				name: lastPart, // preserve as-is: ".5", "1", "2" etc.
+				name: lastPart,
 				size: `min(${rem}rem, ${vwVal}vw)`,
 			});
 		}
@@ -109,11 +113,11 @@ async function handleFluidCollection(collection: any, theme: any): Promise<void>
 	theme.settings = theme.settings || {};
 	if (fontSizes.length > 0) {
 		theme.settings.typography = theme.settings.typography || {};
-		theme.settings.typography.fontSizes = fontSizes;
+		theme.settings.typography['font-sizes'] = fontSizes;
 	}
 	if (spacingSizes.length > 0) {
 		theme.settings.spacing = theme.settings.spacing || {};
-		theme.settings.spacing.spacingSizes = spacingSizes;
+		theme.settings.spacing['spacing-sizes'] = spacingSizes;
 	}
 }
 
@@ -129,12 +133,12 @@ const ASPECT_RATIO_NAMES: Record<string, string> = {
 
 const ARRAY_SETTINGS: Record<string, { settingsPath: string[]; valueKey: string; formatValue?: (v: any) => string }> = {
 	'border/radius-sizes': {
-		settingsPath: ['border', 'radiusSizes'],
+		settingsPath: ['border', 'radius-sizes'],
 		valueKey: 'size',
 		formatValue: (v: number) => `${v}px`,
 	},
 	'dimensions/aspect-ratios': {
-		settingsPath: ['dimensions', 'aspectRatios'],
+		settingsPath: ['dimensions', 'aspect-ratios'],
 		valueKey: 'ratio',
 	},
 	'shadow/presets': {
@@ -151,6 +155,7 @@ async function handleStaticCollection(collection: any, theme: any, collectionsMa
 		const variable = await figma.variables.getVariableByIdAsync(variableId);
 		if (!variable) continue;
 		const { name, resolvedType, valuesByMode } = variable;
+		if (shouldSkip(name)) continue;
 		const value = valuesByMode[mode.modeId];
 		if (value === undefined) continue;
 
@@ -179,9 +184,7 @@ async function handleStaticCollection(collection: any, theme: any, collectionsMa
 			arrayAccumulator[prefix].push({ slug, name: itemName, [arrayConfig.valueKey]: resolvedVal });
 
 		} else if (nameParts.length === 2) {
-			// Scalar setting
 			const normalizedPath = nameParts.map(p => p.toLowerCase()).join('/');
-			if (normalizedPath === 'layout/navigation-size') continue;
 			if (nameParts[0].toLowerCase() === 'typography') continue;
 
 			let resolvedVal: any = null;
@@ -194,15 +197,15 @@ async function handleStaticCollection(collection: any, theme: any, collectionsMa
 			}
 			if (resolvedVal === null) continue;
 
-			const category = toCamelCase(nameParts[0].toLowerCase());
-			const key = toCamelCase(nameParts[1].toLowerCase());
+			// Use raw lowercased path segments (preserve kebab-case as-is)
+			const category = nameParts[0].toLowerCase();
+			const key = nameParts[1].toLowerCase();
 			theme.settings = theme.settings || {};
 			theme.settings[category] = theme.settings[category] || {};
 			theme.settings[category][key] = resolvedVal;
 		}
 	}
 
-	// Flush array accumulators into theme
 	for (const prefix of Object.keys(arrayAccumulator)) {
 		const items = arrayAccumulator[prefix];
 		if (!items.length) continue;
@@ -220,6 +223,7 @@ async function handleCustomCollection(collection: any, theme: any, collectionsMa
 		const variable = await figma.variables.getVariableByIdAsync(variableId);
 		if (!variable) continue;
 		const { name, resolvedType, valuesByMode } = variable;
+		if (shouldSkip(name)) continue;
 		const value = valuesByMode[mode.modeId];
 		if (value === undefined) continue;
 
@@ -241,6 +245,7 @@ async function handleStylesCollection(collection: any, theme: any, collectionsMa
 		const variable = await figma.variables.getVariableByIdAsync(variableId);
 		if (!variable) continue;
 		const { name, resolvedType, valuesByMode } = variable;
+		if (shouldSkip(name)) continue;
 		const value = valuesByMode[mode.modeId];
 		if (value === undefined) continue;
 

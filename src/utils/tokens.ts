@@ -5,7 +5,7 @@ export function transformTokenReference(collectionName: string, varName: string)
 	const col = collectionName.toLowerCase().trim();
 
 	if (col.startsWith('!-usa')) {
-		// collection "!-usa", varName "color/blue/5v" → "var(--token--color--blue-5v)"
+		// "!-usa", varName "color/blue/5v" → "var(--token--color--blue-5v)"
 		const parts = varName.split('/');
 		const category = parts[0].toLowerCase();
 		const rest = parts.slice(1).map(p => p.toLowerCase()).join('-');
@@ -13,9 +13,36 @@ export function transformTokenReference(collectionName: string, varName: string)
 	}
 
 	if (col.startsWith('!-theme')) {
-		// collection "!-theme-tokens", varName "theme/color/accent-warm-lighter" → "var(--theme--color--accent-warm-lighter)"
+		// "!-theme-tokens", varName "theme/color/accent" → "var(--theme--color--accent)"
 		const cssPath = varName.toLowerCase().replace(/\//g, '--');
 		return `var(--${cssPath})`;
+	}
+
+	if (col === 'settings [color]') {
+		// → var(--wp--preset--color--{last-segment})
+		const parts = varName.split('/');
+		const slug = parts[parts.length - 1].toLowerCase();
+		return `var(--wp--preset--color--${slug})`;
+	}
+
+	if (col === 'settings [custom color]') {
+		// → var(--wp--custom--color--{last-segment})
+		const parts = varName.split('/');
+		const slug = parts[parts.length - 1].toLowerCase();
+		return `var(--wp--custom--color--${slug})`;
+	}
+
+	if (col === 'settings [fluid]') {
+		// Font size or spacing preset depending on first path segment
+		const parts = varName.split('/');
+		const group = parts[0].toLowerCase();
+		const slug = parts[parts.length - 1].toLowerCase();
+		if (group.includes('font') || group.includes('type')) {
+			return `var(--wp--preset--font-size--${slug})`;
+		}
+		if (group.includes('spacing') || group.includes('space')) {
+			return `var(--wp--preset--spacing--${slug})`;
+		}
 	}
 
 	// Fallback: wp--custom-- reference
@@ -25,8 +52,13 @@ export function transformTokenReference(collectionName: string, varName: string)
 export async function resolveAliasToString(variableId: string, collectionsMap: Map<string, string>): Promise<string | null> {
 	const targetVar = await figma.variables.getVariableByIdAsync(variableId);
 	if (!targetVar) return null;
-	const collectionName = collectionsMap.get(targetVar.variableCollectionId);
-	if (!collectionName) return null;
+	let collectionName = collectionsMap.get(targetVar.variableCollectionId);
+	if (!collectionName) {
+		// Variable is from a library collection — fetch it directly
+		const collection = await figma.variables.getVariableCollectionByIdAsync(targetVar.variableCollectionId);
+		if (!collection) return null;
+		collectionName = collection.name;
+	}
 	return transformTokenReference(collectionName, targetVar.name);
 }
 
