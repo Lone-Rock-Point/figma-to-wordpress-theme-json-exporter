@@ -19,18 +19,17 @@ The plugin reads six named variable collections from your Figma document and map
 
 ## Installation
 
-### From Figma Community
-
-Search for "WordPress Theme.json Export" in the Figma Community tab and click **Install**.
-
-### From a downloaded release
-
 1. Download the latest release zip from the [releases page](https://github.com/Lone-Rock-Point/figma-to-wordpress-theme-json-exporter/releases) and unzip it
-2. In Figma desktop, go to **Menu > Plugins > Development > Import plugin from manifest...**
-3. Navigate to the unzipped folder and select `manifest.json`
-4. The plugin will appear under **Menu > Plugins > Development** and is ready to use
+2. Inside the unzipped folder, run:
+   ```bash
+   npm install
+   npm run build
+   ```
+3. In Figma desktop, go to **Menu > Plugins > Development > Import plugin from manifest...**
+4. Navigate to the unzipped folder and select `manifest.json`
+5. The plugin will appear under **Menu > Plugins > Development** and is ready to use
 
-> **Note:** The plugin must be re-imported if you update to a newer release.
+> **Note:** Re-run `npm run build` and re-import the manifest whenever you update to a newer release.
 
 ## Usage
 
@@ -118,8 +117,6 @@ npm install
 npm run watch   # watch mode
 npm run build   # production build
 ```
-
-After building, point Figma to `manifest.json` via **Plugins > Development > Import plugin from manifest**.
 
 ## Support Level
 
