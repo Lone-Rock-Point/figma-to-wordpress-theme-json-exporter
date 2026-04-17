@@ -115,7 +115,7 @@ See [CHANGELOG.md](https://github.com/10up/figma-to-wordpress-theme-json-exporte
 
 ## Contributing
 
-See [CONTRIBUTING.md](https://github.com/10up/figma-to-wordpress-theme-json-exporter/blob/develop/CONTRIBUTING.md) and [CODE_OF_CONDUCT.md](https://github.com/10up/figma-to-wordpress-theme-json-exporter/blob/develop/CODE_OF_CONDUCT.md).
+See [CONTRIBUTING.md](https://github.com/10up/figma-to-wordpress-theme-json-exporter/blob/develop/CONTRIBUTING.md), [CODE_OF_CONDUCT.md](https://github.com/10up/figma-to-wordpress-theme-json-exporter/blob/develop/CODE_OF_CONDUCT.md), and [COLLECTIONS-GUIDE.md](COLLECTIONS-GUIDE.md) for full collection documentation.
 
 ## Like what you see?
 
