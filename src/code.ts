@@ -8,9 +8,15 @@ import { applyCssVarSyntaxToVariables } from './utils/figma-variables';
 figma.ui.onmessage = async (e) => {
 	console.log("code received message", e);
 	if (e.type === "EXPORT") {
-		// Extract options from the message
-		const options: ExportOptions = e.options || {};
-		await exportToJSON(options);
+		try {
+			const options: ExportOptions = e.options || {};
+			await exportToJSON(options);
+		} catch (error) {
+			figma.ui.postMessage({
+				type: "EXPORT_RESULT",
+				error: error instanceof Error ? error.message : String(error)
+			});
+		}
 	} else if (e.type === "GET_COLOR_PRESETS") {
 		// Get all available color presets for the UI
 		try {
