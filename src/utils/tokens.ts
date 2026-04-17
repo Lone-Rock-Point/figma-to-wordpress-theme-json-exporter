@@ -48,9 +48,11 @@ export function transformTokenReference(collectionName: string, varName: string)
 
 	if (col === 'settings [static]') {
 		const parts = varName.split('/');
-		const prefix = parts.slice(0, 2).join('/').toLowerCase();
-		const slug = parts[parts.length - 1].toLowerCase();
-		if (prefix === 'border/radius-sizes') {
+		// Normalize to handle both radius-sizes and radiusSizes
+		const category = normalizeCssSegment(parts[0]);
+		const group = normalizeCssSegment(parts[1] || '');
+		const slug = normalizeCssSegment(parts[parts.length - 1]);
+		if (category === 'border' && group === 'radius-sizes') {
 			return `var(--wp--preset--border-radius--${slug})`;
 		}
 	}
