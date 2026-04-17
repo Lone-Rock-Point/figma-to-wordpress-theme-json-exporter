@@ -2,336 +2,120 @@
 
 [![Support Level](https://img.shields.io/badge/support-beta-blueviolet.svg)](#support-level) [![MIT License](https://img.shields.io/github/license/10up/10up-block-theme-json-export.svg)](https://github.com/10up/figma-to-wordpress-theme-json-exporter/blob/develop/LICENSE.md)
 
-> This Figma plugin converts Figma design tokens/variables into WordPress theme.json format, placing all variables under the `settings.custom` section according to WordPress standards.
+> This Figma plugin exports named variable collections to the correct sections of a WordPress theme.json file, merging into your existing theme rather than overwriting it.
 
-## Features
+## How It Works
 
-- Export Figma variables (colors, numbers) into WordPress theme.json format
-- Merge variables into an existing theme.json file
-- Properly structures data according to WordPress theme.json specification
-- Converts variable references to CSS custom properties using WordPress naming convention
-- Maintains variable hierarchies and references
-- Special handling for color modes and sections
-- Automatic generation of button variant style files
-- Support for responsive/fluid variables
-- Automatic unit handling (px) for specific value types
-- Supports downloading the generated files as a zip package
-- **Typography presets** - Convert Figma text styles to WordPress typography presets *(10up tooling feature)*
-- **Color presets** - Generate WordPress color palette from Figma color variables with customizable selection
-- **Spacing presets** - Create WordPress spacing presets from Figma spacing variables
-- Line height values converted from percentage to decimal format (e.g., 120% → 1.2)
-- Text decoration properties with proper color, thickness, and offset handling
-- Omits empty or invalid properties rather than using fallbacks
-- **Resizable plugin interface** for better workflow integration
-- **Multi-file export** with automatic zip packaging for complex themes
+The plugin reads six named variable collections from your Figma document and maps them directly to their corresponding locations in `theme.json`. Only the keys defined in Figma are updated — everything else in your existing theme.json is preserved.
+
+| Collection name | Maps to |
+|----------------|---------|
+| `settings [color]` | `settings.color.palette` |
+| `settings [fluid]` | `settings.typography.fontSizes` and `settings.spacing.spacingSizes` |
+| `settings [static]` | `settings.border`, `settings.dimensions`, `settings.shadow`, and other scalar settings |
+| `settings [custom color]` | `settings.custom.*` |
+| `settings [custom]` | `settings.custom.*` |
+| `styles` | `styles.*` |
 
 ## Usage
 
-### Basic Export
+1. Go to **Menu > Plugins > WordPress Theme.json Export > Export to theme.json**
+2. Click **Choose File** and upload your existing `theme.json`
+3. Click **Export Variables**
+4. Preview the result and click **Download Theme Files**
 
-1. **To export Figma variables to theme.json:**
-   - Go to Menu > Plugins > WordPress Theme.json Export > Export to theme.json
-   - Optionally upload an existing theme.json file to merge variables into it
-   - Configure export options (typography, color presets, spacing presets)
-   - Click "Export Variables" to generate the theme files
-   - View the generated theme.json and additional style files in the plugin UI
-   - Click "Download Theme Files" to save all files as a zip package
+## Variable Collection Setup
 
-### Advanced Options
+### `settings [color]`
 
-2. **To merge with an existing theme.json:**
-   - Click "Choose File" in the Base theme.json section
-   - Select your existing theme.json file
-   - The plugin will merge your Figma variables into the existing theme structure
-   - All existing theme.json settings and styles will be preserved
-   - New variables will be added under settings.custom
+Each variable becomes a color palette entry. Variable aliases are resolved to CSS variable references.
 
-3. **Typography Presets:** *(10up tooling feature)*
-   - Check "Generate typography presets from text styles"
-   - The plugin will convert all local text styles in your Figma document
-   - Typography presets are added to `settings.custom.typography.presets`
-   - See [TYPOGRAPHY-GUIDE.md](TYPOGRAPHY-GUIDE.md) for detailed information
-
-4. **Color Presets:**
-   - Check "Generate color presets from color variables"
-   - Click "Customize" to select specific colors from your collections
-   - Use the color selection modal to choose which variables to include
-   - Color presets are added to `settings.color.palette`
-   - Supports preview of actual color values and organized by collection
-   - See [COLOR-PRESETS-GUIDE.md](COLOR-PRESETS-GUIDE.md) for detailed information
-
-5. **Spacing Presets:**
-   - Check "Generate spacing presets from spacing variables"
-   - The plugin automatically detects spacing-related variables
-   - Spacing presets are added to `settings.spacing.spacingSizes`
-   - See [SPACING-GUIDE.md](SPACING-GUIDE.md) for detailed information
-
-### Plugin Interface Features
-
-- **Resizable Interface**: Drag the resize handle in the bottom-right corner to adjust plugin size
-- **File Preview**: View generated files with syntax highlighting and copy functionality
-- **Multi-file Download**: Automatic zip packaging when multiple files are generated
-- **Error Handling**: Clear error messages and validation feedback
-
-## WordPress theme.json Structure
-
-The plugin generates a valid WordPress theme.json file with all variables placed under the `settings.custom` section:
-
-```json
-{
-  "version": 3,
-  "settings": {
-    "custom": {
-      "color": {
-        "primary": "#000000",
-        "secondary": "#ffffff",
-        "accent": "var(--wp--custom--color--primary)",
-        "button": {
-          "default": {
-            "background": "var(--wp--custom--color--button--primary--default--background)",
-            "text": "var(--wp--custom--color--button--primary--default--text)"
-          },
-          "hover": {
-            "background": "var(--wp--custom--color--button--primary--hover--background)",
-            "text": "var(--wp--custom--color--button--primary--hover--text)"
-          }
-        }
-      },
-      "spacing": {
-        "base": "8px",
-        "large": "24px"
-      }
-    }
-  }
-}
+```
+primary/500  →  { slug: "primary-500", name: "Primary 500", color: "var(--token--...)" }
 ```
 
-### Base Theme Merging
+### `settings [fluid]`
 
-When uploading an existing theme.json file:
-- The plugin preserves all existing theme settings and styles
-- New variables from Figma are merged into the `settings.custom` section
-- Existing custom variables with the same name are updated with new values
-- Other sections of the theme.json file remain untouched
-- Color modes and button styles are still exported as separate files
+Requires three modes: **Desktop**, **Mobile**, and **vw**.
 
-### Special Collection Handling
+- Variables whose first path segment contains `font` or `type` → `settings.typography.fontSizes`
+  ```json
+  { "slug": "xl", "name": "Xl", "size": "32px", "fluid": { "min": "24px", "max": "32px" } }
+  ```
+- Variables whose first path segment contains `spacing` or `space` → `settings.spacing.spacingSizes`
+  ```json
+  { "slug": "lg", "name": "lg", "size": "min(2rem, 3vw)" }
+  ```
+  The fluid spacing formula is `min({desktop/16}rem, {vw}vw)`.
 
-The plugin provides special handling for certain Figma variable collections:
+### `settings [static]`
 
-#### Primitives Collection
+Scalar two-part variables (e.g. `layout/content-size`) map to `settings.layout.contentSize`.
 
-Variables from a collection named "Primitives" are used as the base theme and are always processed first.
+Array variables use these exact paths:
 
-#### Color Collection with Multiple Modes
+| Figma path prefix | Maps to | Value key |
+|-------------------|---------|-----------|
+| `border/radius-sizes/{slug}` | `settings.border.radiusSizes` | `size` |
+| `dimensions/aspect-ratios/{slug}` | `settings.dimensions.aspectRatios` | `ratio` |
+| `shadow/presets/{slug}` | `settings.shadow.presets` | `shadow` |
 
-If a collection named "Color" has multiple modes:
-- The first mode is merged into the main theme.json
-- Each mode (including the first) is also exported as a separate file: `styles/section-{mode-name}.json`
-- These files include proper metadata for WordPress theme variations
+Aspect ratio slugs are written with hyphens (`16-9`) and values as fractions (`16/9`). Common ratios get human-readable names automatically (Wide, Square, Standard, etc.).
 
-#### Button Styles
+### `settings [custom color]` and `settings [custom]`
 
-When the "Color" collection includes a "button" group with variants:
-- Button variant properties from the primary button are referenced at the root level with CSS variables
-- Each non-primary button variant (e.g., secondary, tertiary, etc.) is exported as a separate file: `styles/button-{variant-name}.json`
-- These files include proper metadata for WordPress block style variations
+Variable path becomes the key path under `settings.custom`. For example:
 
-### Typography Handling
-
-The plugin can generate typography presets from Figma text styles:
-
-- Font family, size, weight, and line height are extracted from text styles
-- Line height values in percentage format (120%) are automatically converted to decimal format (1.2) as required by WordPress
-- Text decoration properties (color, style, thickness, offset) are properly handled
-- The plugin omits empty or invalid properties rather than using fallbacks to ensure clean output
-
-### Responsive/Fluid Variables *(10up tooling feature)*
-
-If a collection has exactly two modes named "Desktop" and "Mobile", the plugin treats them as responsive variables:
-
-```json
-{
-  "spacing": {
-    "base": {
-      "fluid": "true",
-      "min": "8px",
-      "max": "16px"
-    }
-  }
-}
+```
+color/link/default  →  settings.custom.color.link.default
 ```
 
-Note: The "fluid" property is output as a string value "true" rather than a boolean to ensure compatibility with WordPress theme.json parsing.
+Aliases to `!-usa/` collections resolve to `var(--token--category--name)`.  
+Aliases to `!-theme-tokens/` collections resolve to `var(--theme--path)`.
 
-### Units Handling
+### `styles`
 
-The plugin automatically adds "px" units to numeric values in appropriate categories:
-- spacing
-- font
-- size
-- grid
-- radius
-- width
-- height
+Variable path becomes the key path under `styles`. For example:
 
-### CSS Custom Properties
-
-The plugin automatically converts references between variables to WordPress CSS custom property format. According to WordPress conventions:
-
-- All custom properties are prefixed with `--wp--custom--`
-- Each level of nesting adds another `--` separator
-- CamelCase names are converted to kebab-case (lowercase with hyphens)
-
-For example:
 ```
-settings.custom.colorPalette.brandAccent → var(--wp--custom--color-palette--brand-accent)
+elements/link/:hover/color/text  →  styles.elements.link.:hover.color.text
 ```
 
-This ensures that your theme.json file follows WordPress best practices and that all variable references will work correctly in your theme.
+## Variable Reference Resolution
 
-For more information on the WordPress theme.json format, see the [WordPress documentation](https://developer.wordpress.org/block-editor/how-to-guides/themes/global-settings-and-styles/).
+| Alias collection prefix | Resolved to |
+|------------------------|-------------|
+| `!-usa/color/blue/5v` | `var(--token--color--blue-5v)` |
+| `!-theme-tokens/theme/color/accent` | `var(--theme--color--accent)` |
+| Any other collection | `var(--wp--custom--path--to--var)` |
 
-## Color Presets
+## Plugin Interface
 
-The plugin can generate WordPress color presets from your Figma color variables, making them available in the WordPress block editor's color picker. For comprehensive information about this feature, see [COLOR-PRESETS-GUIDE.md](COLOR-PRESETS-GUIDE.md).
-
-### Quick Overview
-
-- Processes color variables from all collections except "Primitives"
-- Customizable selection through an interactive modal interface
-- Organized by collection with visual color previews
-- Creates WordPress color presets under `settings.color.palette`
-
-## Spacing Presets
-
-The plugin automatically generates WordPress spacing presets from Figma spacing variables. For detailed information about spacing presets, see [SPACING-GUIDE.md](SPACING-GUIDE.md).
-
-### Quick Overview
-
-- Processes variables from "Spacing" and "Primitives" collections
-- Automatically detects spacing-related keywords (spacing, gap, margin, padding, size)
-- Special handling for fluid spacing variables (e.g., `24_16` becomes "Fluid (16 → 24)")
-- Creates WordPress spacing presets under `settings.spacing.spacingSizes`
-
-## Output Files
-
-The plugin generates several types of files depending on your configuration and Figma setup:
-
-### Core Files
-
-1. **Main theme.json**
-   - Contains the base theme settings from the "Primitives" collection
-   - Includes the first mode of the "Color" collection
-   - Contains all custom variables under `settings.custom`
-   - Includes typography, color, and spacing presets if enabled
-
-### Style Variation Files
-
-2. **Section Files** (when applicable)
-   - Located in the "styles" directory
-   - File naming: `section-{mode-name}.json`
-   - Generated for Color collections with multiple modes
-   - Each file represents a color mode that can be applied to groups or sections
-   - Includes proper WordPress theme variation metadata
-
-3. **Button Style Files** (when applicable)
-   - Located in the "styles" directory
-   - File naming: `button-{variant-name}.json`
-   - Generated when button variants are found in the Color collection
-   - Each file represents a button style variant for WordPress block styles
-   - Includes proper WordPress block style variation metadata
-
-### File Generation Logic
-
-- **Single file**: When only basic variables are exported without additional modes or button variants
-- **Multiple files**: When Color collections have multiple modes or button variants are detected
-- **Automatic zip packaging**: When multiple files are generated, they're automatically packaged into a zip file for download
-
-### File Structure Example
-
-For a complex setup, you might get:
-```
-wordpress-theme-files.zip
-├── theme.json                    # Main theme file
-└── styles/
-    ├── section-light.json        # Light color mode
-    ├── section-dark.json         # Dark color mode
-    ├── button-secondary.json     # Secondary button variant
-    └── button-tertiary.json      # Tertiary button variant
-```
-
-All files are packed into a single zip download for easy use in WordPress themes.
-
-## Detailed Guides
-
-For comprehensive information on specific features, see these detailed guides:
-
-- **[INSTALL.md](INSTALL.md)** - Complete installation and setup instructions
-- **[TYPOGRAPHY-GUIDE.md](TYPOGRAPHY-GUIDE.md)** - Typography presets and text style conversion
-- **[COLOR-PRESETS-GUIDE.md](COLOR-PRESETS-GUIDE.md)** - Color presets and customization modal
-- **[SPACING-GUIDE.md](SPACING-GUIDE.md)** - Spacing presets and variable detection
-- **[FLUID-VARIABLES-GUIDE.md](FLUID-VARIABLES-GUIDE.md)** - Responsive/fluid variables setup
+- **Resizable**: Drag the bottom-right corner to resize
+- **File preview**: Syntax-highlighted output with copy button
+- **Download**: Single file or zip for multiple files
 
 ## Development
 
-This plugin uses TypeScript and the Figma Plugin API. To develop:
+```bash
+npm install
+npm run watch   # watch mode
+npm run build   # production build
+```
 
-1. Install dependencies: `npm install`
-2. Watch for changes: `npm run watch`
-3. Edit the code in `code.ts`
-
-The plugin will automatically transpile TypeScript to JavaScript.
+After building, point Figma to `manifest.json` via **Plugins > Development > Import plugin from manifest**.
 
 ## Support Level
 
-**Beta:** This project is quite new and we're not sure what our ongoing support level for this will be.  Bug reports, feature requests, questions, and pull requests are welcome.  If you like this project please let us know, but be cautious using this in a Production environment!
+**Beta:** Bug reports, feature requests, and pull requests are welcome. Use with caution in production.
 
 ## Changelog
 
-A complete listing of all notable changes to this project are documented in [CHANGELOG.md](https://github.com/10up/figma-to-wordpress-theme-json-exporter/blob/develop/CHANGELOG.md).
-
-## Contributing with Changesets
-
-This project uses [Changesets](https://github.com/changesets/changesets) for version management and changelog generation. When contributing, you'll need to include a changeset with your pull request.
-
-### Adding a Changeset
-
-When you make changes that should be released, run:
-
-```bash
-npm run changeset
-```
-
-This will prompt you to:
-1. Select which packages should be bumped (for this single-package repo, select the main package)
-2. Choose the type of change (patch, minor, or major)
-3. Write a summary of your changes
-
-The changeset will be saved as a file in the `.changeset` directory and should be committed with your changes.
-
-### Types of Changes
-
-- **Patch** (0.0.X): Bug fixes, documentation updates, internal changes
-- **Minor** (0.X.0): New features, enhancements that don't break existing functionality  
-- **Major** (X.0.0): Breaking changes that require users to update their code
-
-### Changeset Requirements
-
-- All pull requests must include a changeset (except for changes that don't affect the published package)
-- The CI will automatically check for changesets and fail if one is missing
-- If your change doesn't warrant a release (e.g., updating README, tests, or CI), you can create an empty changeset by running `npm run changeset` and selecting no packages to bump
-
-### Release Process
-
-When changesets are merged to the main branch:
-1. A "Release" pull request will be automatically created
-2. This PR will update the version number and changelog
-3. When the Release PR is merged, the package will be automatically published to npm
+See [CHANGELOG.md](https://github.com/10up/figma-to-wordpress-theme-json-exporter/blob/develop/CHANGELOG.md).
 
 ## Contributing
 
-Please read [CODE_OF_CONDUCT.md](https://github.com/10up/figma-to-wordpress-theme-json-exporter/blob/develop/CODE_OF_CONDUCT.md) for details on our code of conduct, [CONTRIBUTING.md](https://github.com/10up/figma-to-wordpress-theme-json-exporter/blob/develop/CONTRIBUTING.md) for details on the process for submitting pull requests to us, and [CREDITS.md](https://github.com/10up/figma-to-wordpress-theme-json-exporter/blob/develop/CREDITS.md) for a listing of maintainers, contributors, and libraries for this project.
+See [CONTRIBUTING.md](https://github.com/10up/figma-to-wordpress-theme-json-exporter/blob/develop/CONTRIBUTING.md) and [CODE_OF_CONDUCT.md](https://github.com/10up/figma-to-wordpress-theme-json-exporter/blob/develop/CODE_OF_CONDUCT.md).
 
 ## Like what you see?
 
