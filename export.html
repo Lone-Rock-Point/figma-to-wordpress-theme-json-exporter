@@ -492,7 +492,7 @@
 
 	<div class="options">
 	  <div class="file-upload" style="margin-top: 0; padding-top: 0; border-top: none;">
-		<label class="file-upload-label">Base theme.json (required)</label>
+		<label class="file-upload-label">Add to existing theme.json (optional)</label>
 		<div class="file-upload-row">
 			<input type="file" id="base-theme" accept=".json" style="display: none;" />
 			<button type="button" class="file-upload-button" id="upload-button">Choose File</button>
@@ -506,12 +506,12 @@
 	</div>
 	
 	<div class="button-row">
-	  <button id="export" type="button">Export Variables</button>
+	  <button id="export" type="button">Preview Variables</button>
 	  <button id="download" type="button">Download theme.json</button>
 	</div>
 	<div id="files-container">
 	  <div class="empty-state">
-		Click "Export Variables" to generate WordPress theme files from your Figma variables.
+		Click "Preview Variables" to generate WordPress theme files from your Figma variables.
 	  </div>
 	</div>
   </main>
@@ -588,14 +588,21 @@
 		}
 
 		currentFiles = pluginMessage.files;
-		
+
 		// Clear the files container
 		const filesContainer = document.getElementById('files-container');
 		filesContainer.innerHTML = '';
-		
+
 		// Add each file to the container
 		currentFiles.forEach((file, index) => {
 		  const { fileName, body } = file;
+
+		  // Sort settings so `custom` appears last
+		  if (body && body.settings && 'custom' in body.settings) {
+			const { custom, ...rest } = body.settings;
+			body.settings = { ...rest, custom };
+		  }
+
 		  const fileContent = JSON.stringify(body, null, 2);
 		  
 		  // Create file container
@@ -638,12 +645,13 @@
 		
 		// Show download button if we have files
 		if (currentFiles.length > 0) {
-		  document.getElementById("download").style.display = "block";
-		  // Update button text to indicate it's a zip download if multiple files
 		  const downloadBtn = document.getElementById("download");
-		  downloadBtn.textContent = currentFiles.length > 1 
-			? `Download Theme Files (${currentFiles.length} files)` 
-			: "Download theme.json";
+		  downloadBtn.style.display = "block";
+		  if (currentFiles.length > 1) {
+			downloadBtn.textContent = `Download Theme Files (${currentFiles.length} files)`;
+		  } else {
+			downloadBtn.textContent = baseTheme ? "Download updated theme.json" : "Download new theme.json";
+		  }
 		}
 	  }
 	};
