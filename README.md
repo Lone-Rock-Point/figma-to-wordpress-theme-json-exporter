@@ -123,15 +123,3 @@ npm run build   # production build
 ## Support Level
 
 **Beta:** Bug reports, feature requests, and pull requests are welcome. Use with caution in production.
-
-## Changelog
-
-See [CHANGELOG.md](https://github.com/10up/figma-to-wordpress-theme-json-exporter/blob/develop/CHANGELOG.md).
-
-## Contributing
-
-See [CONTRIBUTING.md](https://github.com/10up/figma-to-wordpress-theme-json-exporter/blob/develop/CONTRIBUTING.md), [CODE_OF_CONDUCT.md](https://github.com/10up/figma-to-wordpress-theme-json-exporter/blob/develop/CODE_OF_CONDUCT.md), and [COLLECTIONS-GUIDE.md](COLLECTIONS-GUIDE.md) for full collection documentation.
-
-## Like what you see?
-
-<a href="http://10up.com/contact/"><img src="https://fueled.com/wp-content/uploads/2025/06/10up-github-banner.webp" alt="Work with the 10up WordPress Practice at Fueled"></a>
