@@ -204,9 +204,9 @@ async function handleStaticCollection(collection: any, theme: any, collectionsMa
 			}
 			if (resolvedVal === null) continue;
 
-			// Convert camelCase to kebab-case
-			const category = toKebabCase(nameParts[0]);
-			const key = toKebabCase(nameParts[1]);
+			// Preserve original casing from Figma variable name (WordPress expects camelCase keys)
+			const category = nameParts[0];
+			const key = nameParts[1];
 			theme.settings = theme.settings || {};
 			theme.settings[category] = theme.settings[category] || {};
 			theme.settings[category][key] = resolvedVal;
