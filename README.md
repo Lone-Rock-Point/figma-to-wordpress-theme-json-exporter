@@ -4,6 +4,8 @@
 
 > This Figma plugin exports named variable collections to the correct sections of a WordPress theme.json file, merging into your existing theme rather than overwriting it.
 
+This plugin is optimized for use with [CivicPress](https://civicpress.us/) — a WordPress block theme built for government and civic organizations. It works seamlessly with the [civicpress](https://github.com/Lone-Rock-Point/civicpress) and [civicpress-child](https://github.com/Lone-Rock-Point/civicpress-child) themes.
+
 ## How It Works
 
 The plugin reads six named variable collections from your Figma document and maps them directly to their corresponding locations in `theme.json`. Only the keys defined in Figma are updated — everything else in your existing theme.json is preserved.
