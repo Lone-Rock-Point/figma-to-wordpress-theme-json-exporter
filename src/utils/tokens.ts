@@ -15,6 +15,15 @@ function normalizeVarPath(path: string): string {
 	return path.split('/').map(normalizeCssSegment).join('--');
 }
 
+// Returns true when the var path matches typography/fontFamilies/{slug} (any casing/hyphenation).
+// Requires at least 3 segments so typography/fontFamilies (no slug) is not mis-resolved.
+function isFontFamilyPath(parts: string[]): boolean {
+	if (parts.length < 3) return false;
+	const first = parts[0].toLowerCase();
+	const second = parts[1] ? parts[1].replace(/-/g, '').toLowerCase() : '';
+	return first === 'typography' && second.includes('fontfamil');
+}
+
 export function transformTokenReference(collectionName: string, varName: string): string {
 	const col = collectionName.toLowerCase().trim();
 	const varLower = varName.toLowerCase();
@@ -35,20 +44,19 @@ export function transformTokenReference(collectionName: string, varName: string)
 	}
 
 	if (col === 'settings [color]') {
-		const parts = varLower.split('/');
-		const slug = parts[parts.length - 1];
+		const slug = varLower.split('/').pop()!;
 		return `var(--wp--preset--color--${slug})`;
 	}
 
 	if (col === 'settings [custom color]') {
-		const parts = varLower.split('/');
-		const slug = parts[parts.length - 1];
-		return `var(--wp--custom--color--${slug})`;
+		// Use the full path (minus optional leading "custom/") so the CSS var matches the exported key
+		const parts = varName.split('/');
+		const stripped = parts[0].toLowerCase() === 'custom' ? parts.slice(1) : parts;
+		return `var(--wp--custom--${normalizeVarPath(stripped.join('/'))})`;
 	}
 
 	if (col === 'settings [static]') {
 		const parts = varName.split('/');
-		// Normalize to handle both radius-sizes and radiusSizes
 		const category = normalizeCssSegment(parts[0]);
 		const group = normalizeCssSegment(parts[1] || '');
 		const slug = normalizeCssSegment(parts[parts.length - 1]);
@@ -63,10 +71,7 @@ export function transformTokenReference(collectionName: string, varName: string)
 			? varName.slice(varName.indexOf('/') + 1)
 			: varName;
 		const parts = raw.split('/');
-		const firstLower = parts[0].toLowerCase();
-		const secondNorm = parts[1] ? parts[1].replace(/-/g, '').toLowerCase() : '';
-		// typography/fontFamilies/{slug} → --wp--preset--font-family--{slug}
-		if (firstLower === 'typography' && secondNorm.includes('fontfamil')) {
+		if (isFontFamilyPath(parts)) {
 			return `var(--wp--preset--font-family--${normalizeCssSegment(parts[parts.length - 1])})`;
 		}
 		return `var(--wp--custom--${normalizeVarPath(raw)})`;
@@ -84,12 +89,9 @@ export function transformTokenReference(collectionName: string, varName: string)
 		}
 	}
 
-	// Fallback: detect font-family pattern regardless of collection
-	const fbParts = varName.split('/');
-	const fbFirst = fbParts[0].toLowerCase();
-	const fbSecond = fbParts[1] ? fbParts[1].replace(/-/g, '').toLowerCase() : '';
-	if (fbFirst === 'typography' && fbSecond.includes('fontfamil')) {
-		return `var(--wp--preset--font-family--${normalizeCssSegment(fbParts[fbParts.length - 1])})`;
+	// Fallback: detect font-family pattern regardless of collection (e.g. library collections)
+	if (isFontFamilyPath(varName.split('/'))) {
+		return `var(--wp--preset--font-family--${normalizeCssSegment(varName.split('/').pop()!)})`;
 	}
 
 	return `var(--wp--custom--${normalizeVarPath(varName)})`;
@@ -100,10 +102,11 @@ export async function resolveAliasToString(variableId: string, collectionsMap: M
 	if (!targetVar) return null;
 	let collectionName = collectionsMap.get(targetVar.variableCollectionId);
 	if (!collectionName) {
-		// Variable is from a library collection — fetch it directly
+		// Variable is from a library collection — fetch and cache it
 		const collection = await figma.variables.getVariableCollectionByIdAsync(targetVar.variableCollectionId);
 		if (!collection) return null;
 		collectionName = collection.name;
+		collectionsMap.set(targetVar.variableCollectionId, collectionName);
 	}
 	return transformTokenReference(collectionName, targetVar.name);
 }

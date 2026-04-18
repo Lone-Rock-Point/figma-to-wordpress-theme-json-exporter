@@ -12,10 +12,6 @@ function toTitleCase(str: string): string {
 	}).join(' ');
 }
 
-function toKebabCase(str: string): string {
-	return str.replace(/([A-Z])/g, c => `-${c.toLowerCase()}`).toLowerCase();
-}
-
 function setNestedValue(obj: Record<string, any>, path: string[], value: any): void {
 	if (path.length === 0) return;
 	if (path.length === 1) { obj[path[0]] = value; return; }
@@ -28,37 +24,38 @@ function shouldSkip(name: string): boolean {
 	return name.split('/').some(p => p.includes('*'));
 }
 
+// Fetch all variables in a collection in parallel
+async function fetchVariables(collection: any): Promise<any[]> {
+	return (await Promise.all(
+		collection.variableIds.map((id: string) => figma.variables.getVariableByIdAsync(id))
+	)).filter(Boolean) as any[];
+}
+
 // --- settings [color] → settings.color.palette ---
 
 async function handleColorCollection(collection: any, theme: any, collectionsMap: Map<string, string>): Promise<void> {
 	const mode = collection.modes[0];
-	const palette: Array<{ slug: string; name: string; color: string }> = [];
+	if (!mode) return;
 
-	for (const variableId of collection.variableIds) {
-		const variable = await figma.variables.getVariableByIdAsync(variableId);
-		if (!variable) continue;
+	const variables = await fetchVariables(collection);
+
+	const palette = (await Promise.all(variables.map(async variable => {
 		const { name, resolvedType, valuesByMode } = variable;
-		if (shouldSkip(name)) continue;
+		if (shouldSkip(name)) return null;
 		const value = valuesByMode[mode.modeId];
-		if (value === undefined) continue;
+		if (value === undefined) return null;
 
-		// Use only the last path segment for slug and name
-		const nameParts = name.split('/');
-		const lastPart = nameParts[nameParts.length - 1];
-		const slug = lastPart.toLowerCase();
-		const displayName = toTitleCase(lastPart);
-
+		const lastPart = name.split('/').pop()!;
 		let color: string | null = null;
 		if (isVariableAlias(value)) {
-			color = await resolveAliasToString((value as any).id, collectionsMap);
+			color = await resolveAliasToString(value.id, collectionsMap);
 		} else if (resolvedType === 'COLOR') {
 			color = rgbToHex(value);
 		} else if (resolvedType === 'STRING' && typeof value === 'string') {
 			color = value;
 		}
-
-		if (color) palette.push({ slug, name: displayName, color });
-	}
+		return color ? { slug: lastPart.toLowerCase(), name: toTitleCase(lastPart), color } : null;
+	}))).filter(Boolean) as Array<{ slug: string; name: string; color: string }>;
 
 	if (palette.length > 0) {
 		theme.settings = theme.settings || {};
@@ -67,7 +64,7 @@ async function handleColorCollection(collection: any, theme: any, collectionsMap
 	}
 }
 
-// --- settings [fluid] → settings.typography.font-sizes + settings.spacing.spacing-sizes ---
+// --- settings [fluid] → settings.typography.fontSizes + settings.spacing.spacingSizes ---
 
 async function handleFluidCollection(collection: any, theme: any): Promise<void> {
 	const desktopMode = collection.modes.find((m: any) => m.name.toLowerCase() === 'desktop');
@@ -76,46 +73,48 @@ async function handleFluidCollection(collection: any, theme: any): Promise<void>
 
 	if (!desktopMode) return;
 
-	const fontSizes: any[] = [];
-	const spacingSizes: any[] = [];
+	const variables = await fetchVariables(collection);
 
-	for (const variableId of collection.variableIds) {
-		const variable = await figma.variables.getVariableByIdAsync(variableId);
-		if (!variable) continue;
+	type FluidEntry = { type: 'font' | 'spacing'; entry: any };
+
+	const results = (await Promise.all(variables.map(async (variable): Promise<FluidEntry | null> => {
 		const { name, resolvedType, valuesByMode } = variable;
-		if (shouldSkip(name)) continue;
-		if (resolvedType !== 'FLOAT') continue;
+		if (shouldSkip(name) || resolvedType !== 'FLOAT') return null;
 
 		const nameParts = name.split('/');
 		const group = nameParts[0].toLowerCase();
 		const lastPart = nameParts[nameParts.length - 1];
-
 		const desktopVal = valuesByMode[desktopMode.modeId];
-		if (typeof desktopVal !== 'number') continue;
+		if (typeof desktopVal !== 'number') return null;
 
 		const isTypography = group.includes('font') || group.includes('type') || group === 'typography';
 		const isSpacing = group.includes('spacing') || group.includes('space');
 
 		if (isTypography && mobileMode) {
 			const mobileVal = valuesByMode[mobileMode.modeId];
-			if (typeof mobileVal !== 'number') continue;
-			fontSizes.push({
+			if (typeof mobileVal !== 'number') return null;
+			return { type: 'font', entry: {
 				slug: lastPart.toLowerCase(),
 				name: toTitleCase(lastPart),
 				size: `${desktopVal}px`,
 				fluid: { min: `${mobileVal}px`, max: `${desktopVal}px` },
-			});
-		} else if (isSpacing && vwMode) {
+			}};
+		}
+		if (isSpacing && vwMode) {
 			const vwVal = valuesByMode[vwMode.modeId];
-			if (typeof vwVal !== 'number') continue;
+			if (typeof vwVal !== 'number') return null;
 			const rem = Math.round((desktopVal / 16) * 10000) / 10000;
-			spacingSizes.push({
+			return { type: 'spacing', entry: {
 				slug: lastPart.toLowerCase(),
 				name: lastPart,
 				size: `min(${rem}rem, ${vwVal}vw)`,
-			});
+			}};
 		}
-	}
+		return null;
+	}))).filter(Boolean) as FluidEntry[];
+
+	const fontSizes = results.filter(r => r.type === 'font').map(r => r.entry);
+	const spacingSizes = results.filter(r => r.type === 'spacing').map(r => r.entry);
 
 	theme.settings = theme.settings || {};
 	if (fontSizes.length > 0) {
@@ -156,15 +155,19 @@ const ARRAY_SETTINGS: Record<string, { settingsPath: string[]; valueKey: string;
 
 async function handleStaticCollection(collection: any, theme: any, collectionsMap: Map<string, string>): Promise<void> {
 	const mode = collection.modes[0];
-	const arrayAccumulator: Record<string, any[]> = {};
+	if (!mode) return;
 
-	for (const variableId of collection.variableIds) {
-		const variable = await figma.variables.getVariableByIdAsync(variableId);
-		if (!variable) continue;
+	const variables = await fetchVariables(collection);
+
+	type StaticResult =
+		| { kind: 'scalar'; category: string; key: string; value: any }
+		| { kind: 'array'; prefix: string; slug: string; itemName: string; valueKey: string; value: any };
+
+	const results = (await Promise.all(variables.map(async (variable): Promise<StaticResult | null> => {
 		const { name, resolvedType, valuesByMode } = variable;
-		if (shouldSkip(name)) continue;
+		if (shouldSkip(name)) return null;
 		const value = valuesByMode[mode.modeId];
-		if (value === undefined) continue;
+		if (value === undefined) return null;
 
 		const nameParts = name.split('/');
 		const prefix = nameParts.slice(0, 2).join('/').toLowerCase();
@@ -172,52 +175,54 @@ async function handleStaticCollection(collection: any, theme: any, collectionsMa
 
 		if (arrayConfig && nameParts.length >= 3) {
 			const slug = nameParts[2].toLowerCase();
-
 			let resolvedVal: any = null;
 			if (resolvedType === 'FLOAT' && typeof value === 'number') {
 				resolvedVal = arrayConfig.formatValue ? arrayConfig.formatValue(value) : value;
 			} else if (resolvedType === 'STRING' && typeof value === 'string') {
 				resolvedVal = value;
 			} else if (isVariableAlias(value)) {
-				resolvedVal = await resolveAliasToString((value as any).id, collectionsMap);
+				resolvedVal = await resolveAliasToString(value.id, collectionsMap);
 			}
-			if (resolvedVal === null) continue;
+			if (resolvedVal === null) return null;
 
 			const itemName = prefix.includes('aspect-ratios')
 				? (ASPECT_RATIO_NAMES[slug] || toTitleCase(slug.replace(/-/g, ':')))
 				: toTitleCase(slug);
+			return { kind: 'array', prefix, slug, itemName, valueKey: arrayConfig.valueKey, value: resolvedVal };
+		}
 
-			arrayAccumulator[prefix] = arrayAccumulator[prefix] || [];
-			arrayAccumulator[prefix].push({ slug, name: itemName, [arrayConfig.valueKey]: resolvedVal });
-
-		} else if (nameParts.length === 2) {
-			const normalizedPath = nameParts.map(p => p.toLowerCase()).join('/');
-			if (nameParts[0].toLowerCase() === 'typography') continue;
-
+		if (nameParts.length === 2 && nameParts[0].toLowerCase() !== 'typography') {
 			let resolvedVal: any = null;
 			if (resolvedType === 'FLOAT' && typeof value === 'number') {
 				resolvedVal = `${value}px`;
 			} else if (resolvedType === 'STRING' && typeof value === 'string') {
 				resolvedVal = value;
 			} else if (isVariableAlias(value)) {
-				resolvedVal = await resolveAliasToString((value as any).id, collectionsMap);
+				resolvedVal = await resolveAliasToString(value.id, collectionsMap);
 			}
-			if (resolvedVal === null) continue;
-
+			if (resolvedVal === null) return null;
 			// Preserve original casing from Figma variable name (WordPress expects camelCase keys)
-			const category = nameParts[0];
-			const key = nameParts[1];
-			theme.settings = theme.settings || {};
-			theme.settings[category] = theme.settings[category] || {};
-			theme.settings[category][key] = resolvedVal;
+			return { kind: 'scalar', category: nameParts[0], key: nameParts[1], value: resolvedVal };
+		}
+
+		return null;
+	}))).filter(Boolean) as StaticResult[];
+
+	const arrayAccumulator: Record<string, any[]> = {};
+	theme.settings = theme.settings || {};
+
+	for (const result of results) {
+		if (result.kind === 'scalar') {
+			theme.settings[result.category] = theme.settings[result.category] || {};
+			theme.settings[result.category][result.key] = result.value;
+		} else {
+			arrayAccumulator[result.prefix] = arrayAccumulator[result.prefix] || [];
+			arrayAccumulator[result.prefix].push({ slug: result.slug, name: result.itemName, [result.valueKey]: result.value });
 		}
 	}
 
 	for (const prefix of Object.keys(arrayAccumulator)) {
-		const items = arrayAccumulator[prefix];
-		if (!items.length) continue;
-		theme.settings = theme.settings || {};
-		setNestedValue(theme.settings, ARRAY_SETTINGS[prefix].settingsPath, items);
+		setNestedValue(theme.settings, ARRAY_SETTINGS[prefix].settingsPath, arrayAccumulator[prefix]);
 	}
 }
 
@@ -225,24 +230,29 @@ async function handleStaticCollection(collection: any, theme: any, collectionsMa
 
 async function handleCustomCollection(collection: any, theme: any, collectionsMap: Map<string, string>): Promise<void> {
 	const mode = collection.modes[0];
+	if (!mode) return;
 
-	for (const variableId of collection.variableIds) {
-		const variable = await figma.variables.getVariableByIdAsync(variableId);
-		if (!variable) continue;
+	const variables = await fetchVariables(collection);
+
+	const entries = (await Promise.all(variables.map(async variable => {
 		const { name, resolvedType, valuesByMode } = variable;
-		if (shouldSkip(name)) continue;
+		if (shouldSkip(name)) return null;
 		const value = valuesByMode[mode.modeId];
-		if (value === undefined) continue;
-
+		if (value === undefined) return null;
 		const resolved = await resolveValue(value, resolvedType, collectionsMap);
-		if (resolved === null) continue;
-
-		theme.settings = theme.settings || {};
-		theme.settings.custom = theme.settings.custom || {};
+		if (resolved === null) return null;
 		// Strip leading "custom/" segment to avoid settings.custom.custom double-nesting
 		const pathParts = name.split('/');
-		const strippedPath = pathParts[0].toLowerCase() === 'custom' ? pathParts.slice(1) : pathParts;
-		setNestedValue(theme.settings.custom, strippedPath, resolved);
+		const path = pathParts[0].toLowerCase() === 'custom' ? pathParts.slice(1) : pathParts;
+		return { path, value: resolved };
+	}))).filter(Boolean) as Array<{ path: string[]; value: any }>;
+
+	if (entries.length > 0) {
+		theme.settings = theme.settings || {};
+		theme.settings.custom = theme.settings.custom || {};
+		for (const { path, value } of entries) {
+			setNestedValue(theme.settings.custom, path, value);
+		}
 	}
 }
 
@@ -250,20 +260,25 @@ async function handleCustomCollection(collection: any, theme: any, collectionsMa
 
 async function handleStylesCollection(collection: any, theme: any, collectionsMap: Map<string, string>): Promise<void> {
 	const mode = collection.modes[0];
+	if (!mode) return;
 
-	for (const variableId of collection.variableIds) {
-		const variable = await figma.variables.getVariableByIdAsync(variableId);
-		if (!variable) continue;
+	const variables = await fetchVariables(collection);
+
+	const entries = (await Promise.all(variables.map(async variable => {
 		const { name, resolvedType, valuesByMode } = variable;
-		if (shouldSkip(name)) continue;
+		if (shouldSkip(name)) return null;
 		const value = valuesByMode[mode.modeId];
-		if (value === undefined) continue;
-
+		if (value === undefined) return null;
 		const resolved = await resolveValue(value, resolvedType, collectionsMap);
-		if (resolved === null) continue;
+		if (resolved === null) return null;
+		return { path: name.split('/'), value: resolved };
+	}))).filter(Boolean) as Array<{ path: string[]; value: any }>;
 
+	if (entries.length > 0) {
 		theme.styles = theme.styles || {};
-		setNestedValue(theme.styles, name.split('/'), resolved);
+		for (const { path, value } of entries) {
+			setNestedValue(theme.styles, path, value);
+		}
 	}
 }
 
