@@ -24,6 +24,10 @@ function shouldSkip(name: string): boolean {
 	return name.split('/').some(p => p.includes('*'));
 }
 
+function duplicates(arr: string[]): string[] {
+	return [...new Set(arr.filter((s, i) => arr.indexOf(s) !== i))];
+}
+
 // Fetch all variables in a collection in parallel
 async function fetchVariables(collection: any): Promise<any[]> {
 	return (await Promise.all(
@@ -33,7 +37,9 @@ async function fetchVariables(collection: any): Promise<any[]> {
 
 // --- settings [color] → settings.color.palette ---
 
-async function handleColorCollection(collection: any, theme: any, collectionsMap: Map<string, string>): Promise<void> {
+async function handleColorCollection(
+	collection: any, theme: any, collectionsMap: Map<string, string>, warnings: string[]
+): Promise<void> {
 	const mode = collection.modes[0];
 	if (!mode) return;
 
@@ -57,7 +63,14 @@ async function handleColorCollection(collection: any, theme: any, collectionsMap
 		return color ? { slug: lastPart.toLowerCase(), name: toTitleCase(lastPart), color } : null;
 	}))).filter(Boolean) as Array<{ slug: string; name: string; color: string }>;
 
-	if (palette.length > 0) {
+	const dupes = duplicates(palette.map(e => e.slug));
+	if (dupes.length > 0) {
+		warnings.push(`settings [color]: Duplicate slugs found in exported palette: ${dupes.join(', ')}`);
+	}
+
+	if (palette.length === 0) {
+		warnings.push('settings [color]: No palette entries exported. Check that variables have values and none are fully skipped.');
+	} else {
 		theme.settings = theme.settings || {};
 		theme.settings.color = theme.settings.color || {};
 		theme.settings.color.palette = palette;
@@ -66,12 +79,21 @@ async function handleColorCollection(collection: any, theme: any, collectionsMap
 
 // --- settings [fluid] → settings.typography.fontSizes + settings.spacing.spacingSizes ---
 
-async function handleFluidCollection(collection: any, theme: any): Promise<void> {
+async function handleFluidCollection(collection: any, theme: any, warnings: string[]): Promise<void> {
 	const desktopMode = collection.modes.find((m: any) => m.name.toLowerCase() === 'desktop');
 	const mobileMode = collection.modes.find((m: any) => m.name.toLowerCase() === 'mobile');
 	const vwMode = collection.modes.find((m: any) => m.name.toLowerCase() === 'vw');
 
-	if (!desktopMode) return;
+	if (!desktopMode) {
+		warnings.push('settings [fluid]: Missing "Desktop" mode — nothing will export from this collection.');
+		return;
+	}
+	if (!mobileMode) {
+		warnings.push('settings [fluid]: Missing "Mobile" mode — font sizes will not export.');
+	}
+	if (!vwMode) {
+		warnings.push('settings [fluid]: Missing "vw" mode — spacing sizes will not export.');
+	}
 
 	const variables = await fetchVariables(collection);
 
@@ -116,6 +138,15 @@ async function handleFluidCollection(collection: any, theme: any): Promise<void>
 	const fontSizes = results.filter(r => r.type === 'font').map(r => r.entry);
 	const spacingSizes = results.filter(r => r.type === 'spacing').map(r => r.entry);
 
+	const fontDupes = duplicates(fontSizes.map(e => e.slug));
+	if (fontDupes.length > 0) {
+		warnings.push(`settings [fluid]: Duplicate font size slugs — ${fontDupes.join(', ')}`);
+	}
+	const spaceDupes = duplicates(spacingSizes.map(e => e.slug));
+	if (spaceDupes.length > 0) {
+		warnings.push(`settings [fluid]: Duplicate spacing size slugs — ${spaceDupes.join(', ')}`);
+	}
+
 	theme.settings = theme.settings || {};
 	if (fontSizes.length > 0) {
 		theme.settings.typography = theme.settings.typography || {};
@@ -153,7 +184,9 @@ const ARRAY_SETTINGS: Record<string, { settingsPath: string[]; valueKey: string;
 	},
 };
 
-async function handleStaticCollection(collection: any, theme: any, collectionsMap: Map<string, string>): Promise<void> {
+async function handleStaticCollection(
+	collection: any, theme: any, collectionsMap: Map<string, string>, warnings: string[]
+): Promise<void> {
 	const mode = collection.modes[0];
 	if (!mode) return;
 
@@ -224,11 +257,17 @@ async function handleStaticCollection(collection: any, theme: any, collectionsMa
 	for (const prefix of Object.keys(arrayAccumulator)) {
 		setNestedValue(theme.settings, ARRAY_SETTINGS[prefix].settingsPath, arrayAccumulator[prefix]);
 	}
+
+	if (results.length === 0 && variables.length > 0) {
+		warnings.push('settings [static]: All variables were skipped or unresolvable. Check variable naming (expected: category/property or category/group/slug).');
+	}
 }
 
 // --- settings [custom color] + settings [custom] → settings.custom.* ---
 
-async function handleCustomCollection(collection: any, theme: any, collectionsMap: Map<string, string>): Promise<void> {
+async function handleCustomCollection(
+	collection: any, theme: any, collectionsMap: Map<string, string>, _warnings: string[]
+): Promise<void> {
 	const mode = collection.modes[0];
 	if (!mode) return;
 
@@ -258,7 +297,9 @@ async function handleCustomCollection(collection: any, theme: any, collectionsMa
 
 // --- styles → styles.* ---
 
-async function handleStylesCollection(collection: any, theme: any, collectionsMap: Map<string, string>): Promise<void> {
+async function handleStylesCollection(
+	collection: any, theme: any, collectionsMap: Map<string, string>, _warnings: string[]
+): Promise<void> {
 	const mode = collection.modes[0];
 	if (!mode) return;
 
@@ -284,6 +325,15 @@ async function handleStylesCollection(collection: any, theme: any, collectionsMa
 
 // --- Collection router ---
 
+const RECOGNIZED_COLLECTIONS = [
+	'settings [color]',
+	'settings [fluid]',
+	'settings [static]',
+	'settings [custom color]',
+	'settings [custom]',
+	'styles',
+];
+
 export async function exportToJSON(options: ExportOptions = {}) {
 	const collections = await figma.variables.getLocalVariableCollectionsAsync();
 
@@ -298,23 +348,38 @@ export async function exportToJSON(options: ExportOptions = {}) {
 		settings: { custom: {} },
 	};
 
+	const warnings: string[] = [];
+	const matched: string[] = [];
+
 	for (const collection of collections) {
 		const name = collection.name.toLowerCase().trim();
 		if (name === 'settings [color]') {
-			await handleColorCollection(collection, theme, collectionsMap);
+			matched.push(name);
+			await handleColorCollection(collection, theme, collectionsMap, warnings);
 		} else if (name === 'settings [fluid]') {
-			await handleFluidCollection(collection, theme);
+			matched.push(name);
+			await handleFluidCollection(collection, theme, warnings);
 		} else if (name === 'settings [static]') {
-			await handleStaticCollection(collection, theme, collectionsMap);
+			matched.push(name);
+			await handleStaticCollection(collection, theme, collectionsMap, warnings);
 		} else if (name === 'settings [custom color]' || name === 'settings [custom]') {
-			await handleCustomCollection(collection, theme, collectionsMap);
+			matched.push(name);
+			await handleCustomCollection(collection, theme, collectionsMap, warnings);
 		} else if (name === 'styles') {
-			await handleStylesCollection(collection, theme, collectionsMap);
+			matched.push(name);
+			await handleStylesCollection(collection, theme, collectionsMap, warnings);
 		}
+	}
+
+	if (matched.length === 0) {
+		warnings.unshift(
+			`No recognized collections found. Expected names (case-insensitive): ${RECOGNIZED_COLLECTIONS.join(', ')}.`
+		);
 	}
 
 	figma.ui.postMessage({
 		type: 'EXPORT_RESULT',
 		files: [{ fileName: 'theme.json', body: theme }],
+		warnings,
 	});
 }

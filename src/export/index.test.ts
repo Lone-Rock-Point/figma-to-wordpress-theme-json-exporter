@@ -22,14 +22,14 @@ describe('exportToJSON', () => {
 
 	it('emits default theme when no collections exist', async () => {
 		await exportToJSON();
-		expect(mockFigma.ui.postMessage).toHaveBeenCalledWith({
+		expect(mockFigma.ui.postMessage).toHaveBeenCalledWith(expect.objectContaining({
 			type: 'EXPORT_RESULT',
 			files: [{ fileName: 'theme.json', body: {
 				'$schema': 'https://schemas.wp.org/trunk/theme.json',
 				version: 3,
 				settings: { custom: {} },
 			}}],
-		});
+		}));
 	});
 
 	it('preserves unrelated keys from base theme', async () => {
@@ -338,6 +338,131 @@ describe('exportToJSON', () => {
 			);
 			await exportToJSON();
 			expect(getBody().settings.custom.color.link.default).toBe('#0000ff');
+		});
+	});
+
+	// -----------------------------------------------------------------------
+	// warnings
+	// -----------------------------------------------------------------------
+
+	describe('warnings', () => {
+		function getWarnings() {
+			return mockFigma.ui.postMessage.mock.calls[0][0].warnings as string[];
+		}
+
+		it('warns when no recognized collections are found', async () => {
+			await exportToJSON();
+			expect(getWarnings().some(w => w.includes('No recognized collections found'))).toBe(true);
+		});
+
+		it('emits empty warnings array when recognized collections exist', async () => {
+			mockFigma.variables.getLocalVariableCollectionsAsync.mockResolvedValue([
+				col('settings [color]', [{ modeId: 'm1', name: 'Default' }], ['v1']),
+			]);
+			mockFigma.variables.getVariableByIdAsync.mockResolvedValue(
+				variable('palette/primary', 'COLOR', { m1: { r: 1, g: 0, b: 0, a: 1 } })
+			);
+			await exportToJSON();
+			expect(getWarnings()).toEqual([]);
+		});
+
+		it('warns about duplicate slugs in settings [color]', async () => {
+			mockFigma.variables.getLocalVariableCollectionsAsync.mockResolvedValue([
+				col('settings [color]', [{ modeId: 'm1', name: 'Default' }], ['v1', 'v2']),
+			]);
+			mockFigma.variables.getVariableByIdAsync
+				.mockResolvedValueOnce(variable('group-a/primary', 'COLOR', { m1: { r: 1, g: 0, b: 0, a: 1 } }))
+				.mockResolvedValueOnce(variable('group-b/primary', 'COLOR', { m1: { r: 0, g: 0, b: 1, a: 1 } }));
+			await exportToJSON();
+			expect(getWarnings().some(w => w.includes('Duplicate slugs') && w.includes('primary'))).toBe(true);
+		});
+
+		it('warns when settings [fluid] is missing the Desktop mode', async () => {
+			mockFigma.variables.getLocalVariableCollectionsAsync.mockResolvedValue([
+				col('settings [fluid]', [{ modeId: 'm1', name: 'Mobile' }], ['v1']),
+			]);
+			mockFigma.variables.getVariableByIdAsync.mockResolvedValue(
+				variable('font-size/xl', 'FLOAT', { m1: 24 })
+			);
+			await exportToJSON();
+			expect(getWarnings().some(w => w.includes('Missing "Desktop" mode'))).toBe(true);
+		});
+
+		it('warns when settings [fluid] is missing the Mobile mode', async () => {
+			mockFigma.variables.getLocalVariableCollectionsAsync.mockResolvedValue([
+				col('settings [fluid]', [{ modeId: 'desktop', name: 'Desktop' }, { modeId: 'vw', name: 'vw' }], ['v1']),
+			]);
+			mockFigma.variables.getVariableByIdAsync.mockResolvedValue(
+				variable('font-size/xl', 'FLOAT', { desktop: 36, vw: 3 })
+			);
+			await exportToJSON();
+			expect(getWarnings().some(w => w.includes('Missing "Mobile" mode'))).toBe(true);
+		});
+
+		it('warns when settings [fluid] is missing the vw mode', async () => {
+			mockFigma.variables.getLocalVariableCollectionsAsync.mockResolvedValue([
+				col('settings [fluid]', [{ modeId: 'desktop', name: 'Desktop' }, { modeId: 'mobile', name: 'Mobile' }], ['v1']),
+			]);
+			mockFigma.variables.getVariableByIdAsync.mockResolvedValue(
+				variable('spacing/4', 'FLOAT', { desktop: 32, mobile: 16 })
+			);
+			await exportToJSON();
+			expect(getWarnings().some(w => w.includes('Missing "vw" mode'))).toBe(true);
+		});
+
+		it('warns about duplicate font-size slugs in settings [fluid]', async () => {
+			const MODES = [
+				{ modeId: 'desktop', name: 'Desktop' },
+				{ modeId: 'mobile', name: 'Mobile' },
+				{ modeId: 'vw', name: 'vw' },
+			];
+			mockFigma.variables.getLocalVariableCollectionsAsync.mockResolvedValue([
+				col('settings [fluid]', MODES, ['v1', 'v2']),
+			]);
+			mockFigma.variables.getVariableByIdAsync
+				.mockResolvedValueOnce(variable('font-size/xl', 'FLOAT', { desktop: 36, mobile: 24, vw: 3 }))
+				.mockResolvedValueOnce(variable('typography/xl', 'FLOAT', { desktop: 40, mobile: 28, vw: 3.5 }));
+			await exportToJSON();
+			expect(getWarnings().some(w => w.includes('Duplicate font size slugs') && w.includes('xl'))).toBe(true);
+		});
+
+		it('warns about duplicate spacing-size slugs in settings [fluid]', async () => {
+			const MODES = [
+				{ modeId: 'desktop', name: 'Desktop' },
+				{ modeId: 'mobile', name: 'Mobile' },
+				{ modeId: 'vw', name: 'vw' },
+			];
+			mockFigma.variables.getLocalVariableCollectionsAsync.mockResolvedValue([
+				col('settings [fluid]', MODES, ['v1', 'v2']),
+			]);
+			mockFigma.variables.getVariableByIdAsync
+				.mockResolvedValueOnce(variable('spacing/4', 'FLOAT', { desktop: 32, mobile: 16, vw: 3 }))
+				.mockResolvedValueOnce(variable('space/4', 'FLOAT', { desktop: 24, mobile: 12, vw: 2 }));
+			await exportToJSON();
+			expect(getWarnings().some(w => w.includes('Duplicate spacing size slugs') && w.includes('4'))).toBe(true);
+		});
+
+		it('warns when all settings [static] variables are skipped', async () => {
+			mockFigma.variables.getLocalVariableCollectionsAsync.mockResolvedValue([
+				col('settings [static]', [{ modeId: 'm1', name: 'Default' }], ['v1']),
+			]);
+			mockFigma.variables.getVariableByIdAsync.mockResolvedValue(
+				variable('skip*/property', 'FLOAT', { m1: 42 })
+			);
+			await exportToJSON();
+			expect(getWarnings().some(w => w.includes('settings [static]') && w.includes('skipped'))).toBe(true);
+		});
+
+		it('warns about empty settings [color] palette', async () => {
+			mockFigma.variables.getLocalVariableCollectionsAsync.mockResolvedValue([
+				col('settings [color]', [{ modeId: 'm1', name: 'Default' }], ['v1']),
+			]);
+			// Variable with no valid value in this mode
+			mockFigma.variables.getVariableByIdAsync.mockResolvedValue(
+				variable('palette/primary', 'COLOR', {})
+			);
+			await exportToJSON();
+			expect(getWarnings().some(w => w.includes('No palette entries exported'))).toBe(true);
 		});
 	});
 
