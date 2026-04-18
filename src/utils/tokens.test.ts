@@ -142,6 +142,11 @@ describe('transformTokenReference', () => {
 				.toBe('var(--wp--preset--font-family--roboto)');
 		});
 
+		it('does NOT treat typography/fontFamilies (no slug) as a font-family preset', () => {
+			expect(transformTokenReference('library', 'typography/fontFamilies'))
+				.toBe('var(--wp--custom--typography--font-families)');
+		});
+
 		it('normalizes camelCase segments to kebab-case', () => {
 			expect(transformTokenReference('unknown', 'some/camelCase/variable'))
 				.toBe('var(--wp--custom--some--camel-case--variable)');

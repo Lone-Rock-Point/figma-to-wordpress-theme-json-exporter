@@ -15,8 +15,10 @@ function normalizeVarPath(path: string): string {
 	return path.split('/').map(normalizeCssSegment).join('--');
 }
 
-// Returns true when the var path matches typography/fontFamilies/{slug} (any casing/hyphenation)
+// Returns true when the var path matches typography/fontFamilies/{slug} (any casing/hyphenation).
+// Requires at least 3 segments so typography/fontFamilies (no slug) is not mis-resolved.
 function isFontFamilyPath(parts: string[]): boolean {
+	if (parts.length < 3) return false;
 	const first = parts[0].toLowerCase();
 	const second = parts[1] ? parts[1].replace(/-/g, '').toLowerCase() : '';
 	return first === 'typography' && second.includes('fontfamil');
