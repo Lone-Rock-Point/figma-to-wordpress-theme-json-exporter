@@ -6,6 +6,7 @@ const mockFigma = {
 		getLocalVariableCollectionsAsync: vi.fn(),
 		getVariableByIdAsync: vi.fn(),
 		getVariablesByCollectionIdAsync: vi.fn(),
+		getVariableCollectionByIdAsync: vi.fn(),
 	},
 	getLocalTextStylesAsync: vi.fn(),
 	ui: {
