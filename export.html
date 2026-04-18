@@ -728,10 +728,19 @@
 	}
 
 	function formatDiffValue(val) {
-	  if (Array.isArray(val)) return `[${val.length} ${val.length === 1 ? 'entry' : 'entries'}]`;
-	  if (typeof val === 'string' && val.length > 70) return `"${val.slice(0, 67)}…"`;
-	  if (typeof val === 'string') return `"${val}"`;
+	  const MAX = 70;
+	  const truncate = t => t.length > MAX ? `${t.slice(0, MAX - 1)}…` : t;
+	  if (Array.isArray(val)) {
+		const preview = val.slice(0, 3).map(v => {
+		  if (v && typeof v === 'object' && v.slug) return v.slug;
+		  return JSON.stringify(v);
+		}).join(', ');
+		const suffix = val.length > 3 ? ', …' : '';
+		return `[${preview}${suffix}] (${val.length} ${val.length === 1 ? 'entry' : 'entries'})`;
+	  }
+	  if (typeof val === 'string') return truncate(`"${val}"`);
 	  if (val === null) return 'null';
+	  if (typeof val === 'object') { try { return truncate(JSON.stringify(val)); } catch (_) { /* fall through */ } }
 	  return String(val);
 	}
 
@@ -787,10 +796,21 @@
 		if (change.type === 'modified') {
 		  const val = document.createElement('span');
 		  val.className = 'diff-value';
-		  val.innerHTML =
-			`<span class="diff-old">${formatDiffValue(change.oldVal)}</span>` +
-			`<span class="diff-arrow">→</span>` +
-			formatDiffValue(change.newVal);
+
+		  const oldSpan = document.createElement('span');
+		  oldSpan.className = 'diff-old';
+		  oldSpan.textContent = formatDiffValue(change.oldVal);
+
+		  const arrow = document.createElement('span');
+		  arrow.className = 'diff-arrow';
+		  arrow.textContent = '→';
+
+		  const newSpan = document.createElement('span');
+		  newSpan.textContent = formatDiffValue(change.newVal);
+
+		  val.appendChild(oldSpan);
+		  val.appendChild(arrow);
+		  val.appendChild(newSpan);
 		  detail.appendChild(val);
 		} else {
 		  const val = document.createElement('span');
@@ -819,8 +839,11 @@
 		return;
 	  }
 
+	  const hasError = warnings.some(w => w.startsWith('No recognized'));
 	  countEl.textContent = `${warnings.length} ${warnings.length === 1 ? 'warning' : 'warnings'}`;
 	  listEl.innerHTML = '';
+	  listEl.style.display = 'none';
+	  panel.classList.toggle('has-errors', hasError);
 
 	  for (const w of warnings) {
 		const item = document.createElement('div');
@@ -831,12 +854,13 @@
 	  }
 
 	  panel.style.display = 'block';
+	  document.getElementById('warnings-chevron').classList.remove('open');
 	}
 
 	document.getElementById('warnings-header').addEventListener('click', () => {
 	  const list = document.getElementById('warnings-list');
 	  const chevron = document.getElementById('warnings-chevron');
-	  const open = list.style.display !== 'none';
+	  const open = getComputedStyle(list).display !== 'none';
 	  list.style.display = open ? 'none' : 'block';
 	  chevron.classList.toggle('open', !open);
 	});

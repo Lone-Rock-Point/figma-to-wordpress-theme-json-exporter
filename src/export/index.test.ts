@@ -410,6 +410,49 @@ describe('exportToJSON', () => {
 			expect(getWarnings().some(w => w.includes('Missing "vw" mode'))).toBe(true);
 		});
 
+		it('warns about duplicate font-size slugs in settings [fluid]', async () => {
+			const MODES = [
+				{ modeId: 'desktop', name: 'Desktop' },
+				{ modeId: 'mobile', name: 'Mobile' },
+				{ modeId: 'vw', name: 'vw' },
+			];
+			mockFigma.variables.getLocalVariableCollectionsAsync.mockResolvedValue([
+				col('settings [fluid]', MODES, ['v1', 'v2']),
+			]);
+			mockFigma.variables.getVariableByIdAsync
+				.mockResolvedValueOnce(variable('font-size/xl', 'FLOAT', { desktop: 36, mobile: 24, vw: 3 }))
+				.mockResolvedValueOnce(variable('typography/xl', 'FLOAT', { desktop: 40, mobile: 28, vw: 3.5 }));
+			await exportToJSON();
+			expect(getWarnings().some(w => w.includes('Duplicate font size slugs') && w.includes('xl'))).toBe(true);
+		});
+
+		it('warns about duplicate spacing-size slugs in settings [fluid]', async () => {
+			const MODES = [
+				{ modeId: 'desktop', name: 'Desktop' },
+				{ modeId: 'mobile', name: 'Mobile' },
+				{ modeId: 'vw', name: 'vw' },
+			];
+			mockFigma.variables.getLocalVariableCollectionsAsync.mockResolvedValue([
+				col('settings [fluid]', MODES, ['v1', 'v2']),
+			]);
+			mockFigma.variables.getVariableByIdAsync
+				.mockResolvedValueOnce(variable('spacing/4', 'FLOAT', { desktop: 32, mobile: 16, vw: 3 }))
+				.mockResolvedValueOnce(variable('space/4', 'FLOAT', { desktop: 24, mobile: 12, vw: 2 }));
+			await exportToJSON();
+			expect(getWarnings().some(w => w.includes('Duplicate spacing size slugs') && w.includes('4'))).toBe(true);
+		});
+
+		it('warns when all settings [static] variables are skipped', async () => {
+			mockFigma.variables.getLocalVariableCollectionsAsync.mockResolvedValue([
+				col('settings [static]', [{ modeId: 'm1', name: 'Default' }], ['v1']),
+			]);
+			mockFigma.variables.getVariableByIdAsync.mockResolvedValue(
+				variable('skip*/property', 'FLOAT', { m1: 42 })
+			);
+			await exportToJSON();
+			expect(getWarnings().some(w => w.includes('settings [static]') && w.includes('skipped'))).toBe(true);
+		});
+
 		it('warns about empty settings [color] palette', async () => {
 			mockFigma.variables.getLocalVariableCollectionsAsync.mockResolvedValue([
 				col('settings [color]', [{ modeId: 'm1', name: 'Default' }], ['v1']),

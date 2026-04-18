@@ -65,7 +65,7 @@ async function handleColorCollection(
 
 	const dupes = duplicates(palette.map(e => e.slug));
 	if (dupes.length > 0) {
-		warnings.push(`settings [color]: Duplicate slugs found — only the last entry for each will apply: ${dupes.join(', ')}`);
+		warnings.push(`settings [color]: Duplicate slugs found in exported palette: ${dupes.join(', ')}`);
 	}
 
 	if (palette.length === 0) {
