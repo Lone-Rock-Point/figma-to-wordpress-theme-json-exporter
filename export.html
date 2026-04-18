@@ -93,6 +93,176 @@
 	  display: none;
 	}
 
+	/* Warnings panel */
+	.warnings-panel {
+	  border-radius: 4px;
+	  overflow: hidden;
+	  border: 1px solid var(--figma-color-border);
+	}
+
+	.warnings-panel.has-errors {
+	  border-color: #f5a623;
+	}
+
+	.warnings-header {
+	  display: flex;
+	  align-items: center;
+	  gap: calc(var(--spacing) / 2);
+	  padding: calc(var(--spacing) / 2) var(--spacing);
+	  background-color: #fff8e6;
+	  color: #7a4f00;
+	  font-size: 0.85rem;
+	  font-weight: 600;
+	  cursor: pointer;
+	  width: 100%;
+	  text-align: left;
+	  border: none;
+	}
+
+	.warnings-header:hover {
+	  background-color: #fdf0cc;
+	}
+
+	.warnings-count {
+	  flex: 1;
+	}
+
+	.warnings-chevron {
+	  font-size: 0.7rem;
+	  transition: transform 0.15s ease;
+	}
+
+	.warnings-chevron.open {
+	  transform: rotate(180deg);
+	}
+
+	.warnings-list {
+	  border-top: 1px solid #f5a623;
+	  padding: calc(var(--spacing) / 2) var(--spacing);
+	  background-color: var(--figma-color-bg);
+	  display: none;
+	}
+
+	.warning-item {
+	  font-size: 0.82rem;
+	  color: var(--figma-color-text);
+	  padding: calc(var(--spacing) / 4) 0;
+	  border-bottom: 1px solid var(--figma-color-border);
+	  line-height: 1.4;
+	}
+
+	.warning-item:last-child {
+	  border-bottom: none;
+	}
+
+	.warning-item::before {
+	  content: '⚠ ';
+	  color: #c47d00;
+	}
+
+	.warning-item.is-error::before {
+	  content: '✕ ';
+	  color: var(--figma-color-text-danger, #e53e3e);
+	}
+
+	/* View toggle (Preview / Changes) */
+	.view-controls {
+	  display: none;
+	  gap: 2px;
+	  background-color: var(--figma-color-bg-secondary);
+	  border-radius: 4px;
+	  padding: 2px;
+	}
+
+	.view-btn {
+	  flex: 1;
+	  background: none;
+	  border: none;
+	  color: var(--figma-color-text-secondary);
+	  font-size: 0.85rem;
+	  font-weight: 500;
+	  padding: calc(var(--spacing) / 3) var(--spacing);
+	  border-radius: 3px;
+	  cursor: pointer;
+	}
+
+	.view-btn.active {
+	  background-color: var(--figma-color-bg);
+	  color: var(--figma-color-text);
+	  font-weight: 600;
+	}
+
+	/* Diff view */
+	.diff-container {
+	  display: none;
+	  flex-direction: column;
+	  gap: var(--spacing);
+	}
+
+	.diff-empty {
+	  color: var(--figma-color-text-secondary);
+	  font-size: 0.9rem;
+	  text-align: center;
+	  padding: var(--spacing);
+	  font-style: italic;
+	}
+
+	.diff-list {
+	  font-family: Andale Mono, monospace;
+	  font-size: 0.82rem;
+	  border: 1px solid var(--figma-color-border);
+	  border-radius: 4px;
+	  overflow: hidden;
+	}
+
+	.diff-entry {
+	  display: grid;
+	  grid-template-columns: 1.2rem 1fr;
+	  gap: calc(var(--spacing) / 2);
+	  padding: calc(var(--spacing) / 3) calc(var(--spacing) / 2);
+	  border-bottom: 1px solid var(--figma-color-border);
+	  line-height: 1.4;
+	  align-items: baseline;
+	}
+
+	.diff-entry:last-child {
+	  border-bottom: none;
+	}
+
+	.diff-entry.added {
+	  background-color: rgba(0, 160, 80, 0.08);
+	}
+
+	.diff-entry.modified {
+	  background-color: rgba(200, 130, 0, 0.08);
+	}
+
+	.diff-entry.removed {
+	  background-color: rgba(220, 40, 40, 0.08);
+	}
+
+	.diff-sigil {
+	  font-weight: bold;
+	  text-align: center;
+	}
+
+	.diff-entry.added    .diff-sigil { color: #00a050; }
+	.diff-entry.modified .diff-sigil { color: #c88200; }
+	.diff-entry.removed  .diff-sigil { color: #dc2828; }
+
+	.diff-path {
+	  color: var(--figma-color-text);
+	  word-break: break-all;
+	}
+
+	.diff-value {
+	  color: var(--figma-color-text-secondary);
+	  margin-left: calc(var(--spacing) / 4);
+	}
+
+	.diff-old { text-decoration: line-through; opacity: 0.6; }
+	.diff-arrow { margin: 0 0.25em; opacity: 0.5; }
+
 	.features {
 	  font-size: 0.8rem;
 	  margin-top: 0.5rem;
@@ -509,11 +679,27 @@
 	  <button id="export" type="button">Preview Variables</button>
 	  <button id="download" type="button">Download theme.json</button>
 	</div>
+
+	<div id="warnings-panel" class="warnings-panel" style="display:none">
+	  <button class="warnings-header" id="warnings-header">
+		<span>⚠</span>
+		<span class="warnings-count" id="warnings-count"></span>
+		<span class="warnings-chevron" id="warnings-chevron">▼</span>
+	  </button>
+	  <div class="warnings-list" id="warnings-list"></div>
+	</div>
+
+	<div class="view-controls" id="view-controls">
+	  <button class="view-btn active" id="btn-preview">Preview</button>
+	  <button class="view-btn" id="btn-diff">Changes</button>
+	</div>
+
 	<div id="files-container">
 	  <div class="empty-state">
 		Click "Preview Variables" to generate WordPress theme files from your Figma variables.
 	  </div>
 	</div>
+	<div class="diff-container" id="diff-container"></div>
   </main>
   <div class="resize-handle" id="resize-handle"></div>
   <div class="resize-overlay" id="resize-overlay"></div>
@@ -523,6 +709,161 @@
   <script>
 	let currentFiles = [];
 	let baseTheme = null;
+	let originalBaseTheme = null; // snapshot before export, used for diff
+
+	// --- Diff computation ---
+
+	function flattenForDiff(obj, prefix, out) {
+	  out = out || {};
+	  for (const key of Object.keys(obj)) {
+		const path = prefix ? `${prefix}.${key}` : key;
+		const val = obj[key];
+		if (val !== null && typeof val === 'object' && !Array.isArray(val)) {
+		  flattenForDiff(val, path, out);
+		} else {
+		  out[path] = val;
+		}
+	  }
+	  return out;
+	}
+
+	function formatDiffValue(val) {
+	  if (Array.isArray(val)) return `[${val.length} ${val.length === 1 ? 'entry' : 'entries'}]`;
+	  if (typeof val === 'string' && val.length > 70) return `"${val.slice(0, 67)}…"`;
+	  if (typeof val === 'string') return `"${val}"`;
+	  if (val === null) return 'null';
+	  return String(val);
+	}
+
+	function computeDiff(original, updated) {
+	  const SKIP = new Set(['$schema', 'version']);
+	  const flatOrig = flattenForDiff(original || {}, '');
+	  const flatNew  = flattenForDiff(updated  || {}, '');
+	  const changes = [];
+
+	  const allKeys = [...new Set([...Object.keys(flatOrig), ...Object.keys(flatNew)])].sort();
+	  for (const key of allKeys) {
+		if (SKIP.has(key)) continue;
+		const inOrig = key in flatOrig;
+		const inNew  = key in flatNew;
+		if (!inOrig) {
+		  changes.push({ path: key, type: 'added',    newVal: flatNew[key] });
+		} else if (!inNew) {
+		  changes.push({ path: key, type: 'removed',  oldVal: flatOrig[key] });
+		} else if (JSON.stringify(flatOrig[key]) !== JSON.stringify(flatNew[key])) {
+		  changes.push({ path: key, type: 'modified', oldVal: flatOrig[key], newVal: flatNew[key] });
+		}
+	  }
+	  return changes;
+	}
+
+	function renderDiff(changes) {
+	  const container = document.getElementById('diff-container');
+	  container.innerHTML = '';
+
+	  if (changes.length === 0) {
+		const empty = document.createElement('div');
+		empty.className = 'diff-empty';
+		empty.textContent = 'No changes — the exported values match your existing theme.json.';
+		container.appendChild(empty);
+		return;
+	  }
+
+	  const list = document.createElement('div');
+	  list.className = 'diff-list';
+
+	  for (const change of changes) {
+		const row = document.createElement('div');
+		row.className = `diff-entry ${change.type}`;
+
+		const sigil = document.createElement('span');
+		sigil.className = 'diff-sigil';
+		sigil.textContent = change.type === 'added' ? '+' : change.type === 'removed' ? '−' : '~';
+
+		const detail = document.createElement('span');
+		detail.className = 'diff-path';
+		detail.textContent = change.path;
+
+		if (change.type === 'modified') {
+		  const val = document.createElement('span');
+		  val.className = 'diff-value';
+		  val.innerHTML =
+			`<span class="diff-old">${formatDiffValue(change.oldVal)}</span>` +
+			`<span class="diff-arrow">→</span>` +
+			formatDiffValue(change.newVal);
+		  detail.appendChild(val);
+		} else {
+		  const val = document.createElement('span');
+		  val.className = 'diff-value';
+		  val.textContent = formatDiffValue(change.type === 'added' ? change.newVal : change.oldVal);
+		  detail.appendChild(val);
+		}
+
+		row.appendChild(sigil);
+		row.appendChild(detail);
+		list.appendChild(row);
+	  }
+
+	  container.appendChild(list);
+	}
+
+	// --- Warnings panel ---
+
+	function showWarnings(warnings) {
+	  const panel = document.getElementById('warnings-panel');
+	  const countEl = document.getElementById('warnings-count');
+	  const listEl = document.getElementById('warnings-list');
+
+	  if (!warnings || warnings.length === 0) {
+		panel.style.display = 'none';
+		return;
+	  }
+
+	  countEl.textContent = `${warnings.length} ${warnings.length === 1 ? 'warning' : 'warnings'}`;
+	  listEl.innerHTML = '';
+
+	  for (const w of warnings) {
+		const item = document.createElement('div');
+		const isError = w.startsWith('No recognized');
+		item.className = 'warning-item' + (isError ? ' is-error' : '');
+		item.textContent = w;
+		listEl.appendChild(item);
+	  }
+
+	  panel.style.display = 'block';
+	}
+
+	document.getElementById('warnings-header').addEventListener('click', () => {
+	  const list = document.getElementById('warnings-list');
+	  const chevron = document.getElementById('warnings-chevron');
+	  const open = list.style.display !== 'none';
+	  list.style.display = open ? 'none' : 'block';
+	  chevron.classList.toggle('open', !open);
+	});
+
+	// --- View toggle ---
+
+	function setView(view) {
+	  const filesContainer = document.getElementById('files-container');
+	  const diffContainer  = document.getElementById('diff-container');
+	  const btnPreview = document.getElementById('btn-preview');
+	  const btnDiff    = document.getElementById('btn-diff');
+
+	  if (view === 'preview') {
+		filesContainer.style.display = 'flex';
+		diffContainer.style.display  = 'none';
+		btnPreview.classList.add('active');
+		btnDiff.classList.remove('active');
+	  } else {
+		filesContainer.style.display = 'none';
+		diffContainer.style.display  = 'flex';
+		btnPreview.classList.remove('active');
+		btnDiff.classList.add('active');
+	  }
+	}
+
+	document.getElementById('btn-preview').addEventListener('click', () => setView('preview'));
+	document.getElementById('btn-diff').addEventListener('click', () => setView('diff'));
 
 	// Setup resize functionality
 	const resizeHandle = document.getElementById('resize-handle');
@@ -581,7 +922,6 @@
 	window.onmessage = ({ data: { pluginMessage } }) => {
 	  if (pluginMessage.type === "EXPORT_RESULT") {
 		if (pluginMessage.error) {
-		  // Display error message
 		  const filesContainer = document.getElementById('files-container');
 		  filesContainer.innerHTML = `<div class="empty-state error">${pluginMessage.error}</div>`;
 		  return;
@@ -589,11 +929,13 @@
 
 		currentFiles = pluginMessage.files;
 
-		// Clear the files container
+		// Show warnings
+		showWarnings(pluginMessage.warnings || []);
+
+		// Build preview
 		const filesContainer = document.getElementById('files-container');
 		filesContainer.innerHTML = '';
 
-		// Add each file to the container
 		currentFiles.forEach((file, index) => {
 		  const { fileName, body } = file;
 
@@ -604,55 +946,62 @@
 		  }
 
 		  const fileContent = JSON.stringify(body, null, 2);
-		  
-		  // Create file container
+
 		  const fileContainer = document.createElement('div');
 		  fileContainer.className = 'file-container';
-		  
-		  // Create file header with name and actions
+
 		  const fileHeader = document.createElement('div');
 		  fileHeader.className = 'file-header';
-		  
-		  const fileName2 = document.createElement('div');
-		  fileName2.className = 'file-name';
-		  fileName2.textContent = fileName;
-		  
+
+		  const fileNameEl = document.createElement('div');
+		  fileNameEl.className = 'file-name';
+		  fileNameEl.textContent = fileName;
+
 		  const fileActions = document.createElement('div');
 		  fileActions.className = 'file-actions';
-		  
+
 		  const copyButton = document.createElement('button');
 		  copyButton.className = 'copy-button';
 		  copyButton.textContent = 'Copy';
 		  copyButton.onclick = () => copyToClipboard(index);
-		  
+
 		  fileActions.appendChild(copyButton);
-		  fileHeader.appendChild(fileName2);
+		  fileHeader.appendChild(fileNameEl);
 		  fileHeader.appendChild(fileActions);
-		  
-		  // Create textarea for the file content
+
 		  const textarea = document.createElement('textarea');
 		  textarea.readOnly = true;
 		  textarea.id = `file-content-${index}`;
 		  textarea.value = fileContent;
-		  
-		  // Assemble the file container
+
 		  fileContainer.appendChild(fileHeader);
 		  fileContainer.appendChild(textarea);
-		  
-		  // Add to files container
 		  filesContainer.appendChild(fileContainer);
 		});
-		
-		// Show download button if we have files
+
+		// Show download button
 		if (currentFiles.length > 0) {
 		  const downloadBtn = document.getElementById("download");
 		  downloadBtn.style.display = "block";
 		  if (currentFiles.length > 1) {
 			downloadBtn.textContent = `Download Theme Files (${currentFiles.length} files)`;
 		  } else {
-			downloadBtn.textContent = baseTheme ? "Download updated theme.json" : "Download new theme.json";
+			downloadBtn.textContent = originalBaseTheme ? "Download updated theme.json" : "Download new theme.json";
 		  }
 		}
+
+		// Show diff toggle only when a base file was uploaded (single file output)
+		const viewControls = document.getElementById('view-controls');
+		if (originalBaseTheme && currentFiles.length === 1) {
+		  viewControls.style.display = 'flex';
+		  const changes = computeDiff(originalBaseTheme, currentFiles[0].body);
+		  renderDiff(changes);
+		  document.getElementById('btn-diff').textContent =
+			changes.length > 0 ? `Changes (${changes.length})` : 'Changes';
+		} else {
+		  viewControls.style.display = 'none';
+		}
+		setView('preview');
 	  }
 	};
 
@@ -706,9 +1055,15 @@
 		fileName.textContent = 'No file chosen';
 		clearFile.style.display = 'none';
 		baseTheme = null;
+		originalBaseTheme = null;
+		document.getElementById('view-controls').style.display = 'none';
+		document.getElementById('warnings-panel').style.display = 'none';
+		setView('preview');
 	});
 
 	document.getElementById("export").addEventListener("click", () => {
+	  // Snapshot the base theme before export so the diff compares against the original
+	  originalBaseTheme = baseTheme ? JSON.parse(JSON.stringify(baseTheme)) : null;
 	  parent.postMessage({
 		pluginMessage: { type: "EXPORT", options: { baseTheme } }
 	  }, "*");
