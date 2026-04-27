@@ -320,6 +320,17 @@ describe('exportToJSON', () => {
 			await exportToJSON();
 			expect(getBody().settings.custom.color.brand).toBe('#ff0000');
 		});
+
+		it('appends px to FLOAT values', async () => {
+			mockFigma.variables.getLocalVariableCollectionsAsync.mockResolvedValue([
+				col('settings [custom]', [MODE], ['v1']),
+			]);
+			mockFigma.variables.getVariableByIdAsync.mockResolvedValue(
+				variable('spacing/offset', 'FLOAT', { m1: 8 })
+			);
+			await exportToJSON();
+			expect(getBody().settings.custom.spacing.offset).toBe('8px');
+		});
 	});
 
 	// -----------------------------------------------------------------------
