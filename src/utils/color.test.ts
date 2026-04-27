@@ -87,7 +87,13 @@ describe('rgbToHex', () => {
 
 	it('should handle zero values correctly', () => {
 		expect(rgbToHex({ r: 0, g: 0, b: 0 })).toBe('#000000');
-		expect(rgbToHex({ r: 0, g: 0, b: 0, a: 0 })).toBe('rgba(0, 0, 0, 0.0000)');
+		expect(rgbToHex({ r: 0, g: 0, b: 0, a: 0 })).toBe('transparent');
+	});
+
+	it('should return "transparent" for any fully transparent color (alpha = 0)', () => {
+		expect(rgbToHex({ r: 0, g: 0, b: 0, a: 0 })).toBe('transparent');   // #00000000
+		expect(rgbToHex({ r: 1, g: 1, b: 1, a: 0 })).toBe('transparent');   // #FFFFFF00
+		expect(rgbToHex({ r: 1, g: 0, b: 0.5, a: 0 })).toBe('transparent'); // any RGB, alpha 0
 	});
 
 	it('should handle edge case values that result in single-digit hex', () => {

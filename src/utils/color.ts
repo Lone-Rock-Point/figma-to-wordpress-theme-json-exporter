@@ -26,6 +26,11 @@ export function rgbToHex(color: any): string | null {
 		return null; // Return null if any value is NaN
 	}
 
+	// Fully transparent — use CSS keyword regardless of RGB values
+	if (a === 0) {
+		return 'transparent';
+	}
+
 	if (a !== 1) {
 		// Ensure each RGB value is valid before converting
 		const rValue = Math.max(0, Math.min(1, r));
