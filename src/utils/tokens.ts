@@ -111,10 +111,10 @@ export async function resolveAliasToString(variableId: string, collectionsMap: M
 	return transformTokenReference(collectionName, targetVar.name);
 }
 
-export async function resolveValue(value: any, resolvedType: string, collectionsMap: Map<string, string>): Promise<string | number | null> {
+export async function resolveValue(value: any, resolvedType: string, collectionsMap: Map<string, string>): Promise<string | null> {
 	if (isVariableAlias(value)) return resolveAliasToString(value.id, collectionsMap);
 	if (resolvedType === 'COLOR') return rgbToHex(value);
-	if (resolvedType === 'FLOAT') return typeof value === 'number' ? value : null;
+	if (resolvedType === 'FLOAT') return typeof value === 'number' ? `${value}px` : null;
 	if (resolvedType === 'STRING') return typeof value === 'string' ? value : null;
 	return null;
 }
