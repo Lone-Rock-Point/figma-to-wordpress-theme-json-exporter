@@ -7,12 +7,10 @@
   "main": "dist/code.js",
   "networkAccess": { "allowedDomains": ["https://cdnjs.cloudflare.com"] },
   "menu": [
-    { "command": "export", "name": "Export to theme.json" },
-    { "command": "css-vars", "name": "Apply CSS Variable Syntax" }
+    { "command": "export", "name": "Export to theme.json" }
   ],
-  "ui": { 
-    "export": "export.html",
-    "css-vars": "css-vars.html"
+  "ui": {
+    "export": "export.html"
   },
   "documentAccess": "dynamic-page"
 }

@@ -2,7 +2,6 @@ console.clear();
 
 import { ExportOptions } from './types';
 import { exportToJSON } from './export/index';
-import { applyCssVarSyntaxToVariables } from './utils/figma-variables';
 
 figma.ui.onmessage = async (e) => {
 	console.log("code received message", e);
@@ -16,21 +15,6 @@ figma.ui.onmessage = async (e) => {
 				error: error instanceof Error ? error.message : String(error)
 			});
 		}
-	} else if (e.type === "APPLY_CSS_VAR_SYNTAX") {
-		// Apply CSS var syntax to Figma variables
-		try {
-			const { overwriteExisting } = e.options || {};
-			const result = await applyCssVarSyntaxToVariables({ overwriteExisting });
-			figma.ui.postMessage({
-				type: "CSS_VAR_SYNTAX_RESULT",
-				result
-			});
-		} catch (error) {
-			figma.ui.postMessage({
-				type: "CSS_VAR_SYNTAX_RESULT",
-				error: error instanceof Error ? error.message : "Failed to apply CSS var syntax"
-			});
-		}
 	} else if (e.type === "RESIZE") {
 		// Handle resize message from the UI
 		if (e.width && e.height) {
@@ -42,16 +26,8 @@ figma.ui.onmessage = async (e) => {
 	}
 };
 
-if (figma.command === "export") {
-	figma.showUI(__uiFiles__["export"], {
-		width: 500,
-		height: 500,
-		themeColors: true,
-	});
-} else if (figma.command === "css-vars") {
-	figma.showUI(__uiFiles__["css-vars"], {
-		width: 400,
-		height: 300,
-		themeColors: true,
-	});
-}
+figma.showUI(__uiFiles__["export"], {
+	width: 500,
+	height: 500,
+	themeColors: true,
+});
