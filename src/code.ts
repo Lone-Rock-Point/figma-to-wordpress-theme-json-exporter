@@ -2,9 +2,11 @@ console.clear();
 
 import { ExportOptions } from './types';
 import { exportToJSON } from './export/index';
+import { parseThemeJson, writeImportEntries } from './import/index';
 
 figma.ui.onmessage = async (e) => {
 	console.log("code received message", e);
+
 	if (e.type === "EXPORT") {
 		try {
 			const options: ExportOptions = e.options || {};
@@ -15,8 +17,33 @@ figma.ui.onmessage = async (e) => {
 				error: error instanceof Error ? error.message : String(error)
 			});
 		}
+
+	} else if (e.type === "IMPORT_PREVIEW") {
+		try {
+			const result = parseThemeJson(e.themeJson);
+			figma.ui.postMessage({ type: "IMPORT_PREVIEW_RESULT", ...result });
+		} catch (error) {
+			figma.ui.postMessage({
+				type: "IMPORT_PREVIEW_RESULT",
+				entries: [],
+				warnings: [error instanceof Error ? error.message : String(error)],
+			});
+		}
+
+	} else if (e.type === "IMPORT") {
+		try {
+			const { entries } = parseThemeJson(e.themeJson);
+			const result = await writeImportEntries(entries);
+			figma.ui.postMessage({ type: "IMPORT_RESULT", ...result });
+		} catch (error) {
+			figma.ui.postMessage({
+				type: "IMPORT_RESULT",
+				created: 0, updated: 0, skipped: 0,
+				warnings: [error instanceof Error ? error.message : String(error)],
+			});
+		}
+
 	} else if (e.type === "RESIZE") {
-		// Handle resize message from the UI
 		if (e.width && e.height) {
 			figma.ui.resize(
 				Math.max(300, Math.round(e.width)),
@@ -26,8 +53,17 @@ figma.ui.onmessage = async (e) => {
 	}
 };
 
-figma.showUI(__uiFiles__["export"], {
-	width: 500,
-	height: 500,
-	themeColors: true,
-});
+if (figma.command === "import") {
+	figma.showUI(__uiFiles__["import"], {
+		width: 500,
+		height: 500,
+		themeColors: true,
+	});
+} else {
+	// default: export
+	figma.showUI(__uiFiles__["export"], {
+		width: 500,
+		height: 500,
+		themeColors: true,
+	});
+}

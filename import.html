@@ -1,0 +1,635 @@
+<style>
+	:root { --spacing: 0.8rem; }
+
+	* { box-sizing: border-box; font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Oxygen, Ubuntu, Cantarell, "Open Sans", "Helvetica Neue", sans-serif; }
+
+	body {
+		background-color: var(--figma-color-bg);
+		color: var(--figma-color-text);
+		margin: 0;
+		padding: var(--spacing);
+		min-height: 300px;
+		min-width: 300px;
+		position: relative;
+		overflow: hidden;
+	}
+
+	html, body { height: 100%; }
+
+	main {
+		display: flex;
+		flex-direction: column;
+		gap: var(--spacing);
+		max-height: calc(100% - 20px);
+		overflow-y: auto;
+	}
+
+	button {
+		appearance: none;
+		border-radius: 4px;
+		padding: var(--spacing);
+		background-color: var(--figma-color-bg-brand);
+		border: none;
+		color: var(--figma-color-text-onbrand);
+		font-family: inherit;
+		font-weight: bold;
+		cursor: pointer;
+	}
+
+	button:disabled {
+		opacity: 0.4;
+		cursor: not-allowed;
+	}
+
+	.info-text {
+		font-size: 0.9rem;
+		color: var(--figma-color-text-secondary);
+	}
+
+	/* File upload */
+	.file-upload {
+		border: 1px solid var(--figma-color-border);
+		border-radius: 4px;
+		padding: var(--spacing);
+	}
+
+	.file-upload-label {
+		display: block;
+		font-size: 0.9rem;
+		font-weight: 600;
+		margin-bottom: calc(var(--spacing) / 2);
+	}
+
+	.file-upload-row {
+		display: flex;
+		gap: var(--spacing);
+		align-items: center;
+	}
+
+	.file-upload-button {
+		background-color: var(--figma-color-bg);
+		color: var(--figma-color-text);
+		padding: calc(var(--spacing) / 2);
+		font-size: 0.9rem;
+		border: 1px solid var(--figma-color-border);
+		border-radius: 4px;
+		cursor: pointer;
+		font-weight: normal;
+		flex-shrink: 0;
+	}
+
+	.file-upload-button:hover { background-color: var(--figma-color-bg-hover); }
+
+	.file-upload-name {
+		font-size: 0.9rem;
+		color: var(--figma-color-text-secondary);
+		white-space: nowrap;
+		overflow: hidden;
+		text-overflow: ellipsis;
+		flex: 1;
+	}
+
+	.file-upload-clear {
+		background: none;
+		border: none;
+		color: var(--figma-color-text-secondary);
+		padding: 0;
+		cursor: pointer;
+		font-size: 0.8rem;
+		font-weight: normal;
+	}
+
+	.file-upload-clear:hover { color: var(--figma-color-text); text-decoration: underline; }
+
+	/* Button row */
+	.button-row { display: flex; gap: var(--spacing); }
+
+	#btn-import {
+		background-color: var(--figma-color-bg-success);
+		display: none;
+	}
+
+	/* Warnings panel */
+	.warnings-panel {
+		border-radius: 4px;
+		overflow: hidden;
+		border: 1px solid var(--figma-color-border);
+	}
+
+	.warnings-panel.has-errors { border-color: #f5a623; }
+
+	.warnings-header {
+		display: flex;
+		align-items: center;
+		gap: calc(var(--spacing) / 2);
+		padding: calc(var(--spacing) / 2) var(--spacing);
+		background-color: #fff8e6;
+		color: #7a4f00;
+		font-size: 0.85rem;
+		font-weight: 600;
+		cursor: pointer;
+		width: 100%;
+		text-align: left;
+		border: none;
+	}
+
+	.warnings-header:hover { background-color: #fdf0cc; }
+	.warnings-count { flex: 1; }
+	.warnings-chevron { font-size: 0.7rem; transition: transform 0.15s ease; }
+	.warnings-chevron.open { transform: rotate(180deg); }
+
+	.warnings-list {
+		border-top: 1px solid #f5a623;
+		padding: calc(var(--spacing) / 2) var(--spacing);
+		background-color: var(--figma-color-bg);
+		display: none;
+	}
+
+	.warning-item {
+		font-size: 0.82rem;
+		color: var(--figma-color-text);
+		padding: calc(var(--spacing) / 4) 0;
+		border-bottom: 1px solid var(--figma-color-border);
+		line-height: 1.4;
+	}
+
+	.warning-item:last-child { border-bottom: none; }
+	.warning-item::before { content: '⚠ '; color: #c47d00; }
+	.warning-item.is-error::before { content: '✕ '; color: var(--figma-color-text-danger, #e53e3e); }
+
+	/* Preview */
+	.preview-container {
+		display: flex;
+		flex-direction: column;
+		gap: var(--spacing);
+	}
+
+	.preview-summary {
+		font-size: 0.85rem;
+		color: var(--figma-color-text-secondary);
+		padding: calc(var(--spacing) / 2);
+		background-color: var(--figma-color-bg-secondary);
+		border-radius: 4px;
+	}
+
+	.preview-summary strong { color: var(--figma-color-text); }
+
+	.collection-group { border: 1px solid var(--figma-color-border); border-radius: 4px; overflow: hidden; }
+
+	.collection-header {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		padding: calc(var(--spacing) / 2) var(--spacing);
+		background-color: var(--figma-color-bg-secondary);
+		font-size: 0.85rem;
+		font-weight: 600;
+		border-bottom: 1px solid var(--figma-color-border);
+	}
+
+	.collection-count {
+		font-weight: normal;
+		color: var(--figma-color-text-secondary);
+		font-size: 0.8rem;
+	}
+
+	.entry-table { width: 100%; border-collapse: collapse; font-size: 0.82rem; }
+
+	.entry-table td {
+		padding: calc(var(--spacing) / 3) calc(var(--spacing) / 2);
+		border-bottom: 1px solid var(--figma-color-border);
+		vertical-align: middle;
+	}
+
+	.entry-table tr:last-child td { border-bottom: none; }
+
+	.entry-name { font-family: Andale Mono, monospace; color: var(--figma-color-text); }
+
+	.entry-type {
+		font-size: 0.75rem;
+		padding: 1px 5px;
+		border-radius: 3px;
+		font-weight: 600;
+		text-transform: uppercase;
+		letter-spacing: 0.03em;
+		white-space: nowrap;
+	}
+
+	.type-color { background: rgba(160, 80, 220, 0.12); color: #7020a0; }
+	.type-float { background: rgba(0, 120, 200, 0.12); color: #0060a0; }
+	.type-string { background: rgba(0, 160, 80, 0.12); color: #006830; }
+
+	.entry-value {
+		color: var(--figma-color-text-secondary);
+		font-family: Andale Mono, monospace;
+		font-size: 0.78rem;
+		max-width: 200px;
+		overflow: hidden;
+		text-overflow: ellipsis;
+		white-space: nowrap;
+	}
+
+	.color-swatch {
+		display: inline-block;
+		width: 14px;
+		height: 14px;
+		border-radius: 3px;
+		border: 1px solid var(--figma-color-border);
+		vertical-align: middle;
+		margin-right: 4px;
+		flex-shrink: 0;
+	}
+
+	.entry-modes {
+		display: flex;
+		flex-direction: column;
+		gap: 1px;
+	}
+
+	.mode-row { display: flex; gap: 4px; align-items: center; }
+	.mode-label { color: var(--figma-color-text-tertiary, var(--figma-color-text-secondary)); font-size: 0.72rem; min-width: 48px; }
+
+	/* Result state */
+	.result-panel {
+		border-radius: 4px;
+		padding: var(--spacing);
+		font-size: 0.9rem;
+		display: none;
+	}
+
+	.result-panel.success {
+		background-color: rgba(0, 160, 80, 0.1);
+		border: 1px solid rgba(0, 160, 80, 0.3);
+		color: #006830;
+	}
+
+	.result-panel.error {
+		background-color: rgba(220, 40, 40, 0.1);
+		border: 1px solid rgba(220, 40, 40, 0.3);
+		color: #a01010;
+	}
+
+	.result-panel .result-counts { font-weight: 600; margin-bottom: calc(var(--spacing) / 4); }
+
+	.empty-state {
+		color: var(--figma-color-text-disabled);
+		text-align: center;
+		padding: var(--spacing);
+		font-style: italic;
+		font-size: 0.9rem;
+	}
+
+	/* Resize handle */
+	.resize-handle {
+		position: absolute;
+		bottom: 0; right: 0;
+		width: 20px; height: 20px;
+		cursor: nwse-resize;
+		z-index: 100;
+		opacity: 0.7;
+		transition: opacity 0.2s ease;
+	}
+
+	.resize-handle:hover { opacity: 1; }
+
+	.resize-handle:before, .resize-handle:after {
+		content: "";
+		position: absolute;
+		bottom: 3px; right: 3px;
+		background-color: var(--figma-color-border);
+	}
+
+	.resize-handle:before { width: 2px; height: 12px; bottom: 3px; right: 8px; transform: rotate(45deg); }
+	.resize-handle:after  { width: 12px; height: 2px; bottom: 8px; right: 3px; transform: rotate(45deg); }
+
+	.resize-overlay {
+		position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+		z-index: 99; display: none; cursor: nwse-resize;
+	}
+</style>
+
+<main>
+	<div class="info-text">
+		Import a WordPress <code>theme.json</code> file to populate your Figma variable collections. Existing variables will be updated; new variables will be created.
+	</div>
+
+	<div class="file-upload">
+		<label class="file-upload-label">Choose theme.json to import</label>
+		<div class="file-upload-row">
+			<input type="file" id="theme-file" accept=".json" style="display:none;" />
+			<button type="button" class="file-upload-button" id="upload-button">Choose File</button>
+			<div class="file-upload-name" id="file-name">No file chosen</div>
+			<button type="button" class="file-upload-clear" id="clear-file" style="display:none;">Clear</button>
+		</div>
+	</div>
+
+	<div class="button-row">
+		<button id="btn-preview" type="button" disabled>Preview Import</button>
+		<button id="btn-import" type="button">Import Variables</button>
+	</div>
+
+	<div id="warnings-panel" class="warnings-panel" style="display:none;">
+		<button class="warnings-header" id="warnings-header">
+			<span>⚠</span>
+			<span class="warnings-count" id="warnings-count"></span>
+			<span class="warnings-chevron" id="warnings-chevron">▼</span>
+		</button>
+		<div class="warnings-list" id="warnings-list"></div>
+	</div>
+
+	<div id="result-panel" class="result-panel"></div>
+
+	<div id="preview-container" class="preview-container">
+		<div class="empty-state">Choose a theme.json file and click "Preview Import" to see what will be imported.</div>
+	</div>
+</main>
+
+<div class="resize-handle" id="resize-handle"></div>
+<div class="resize-overlay" id="resize-overlay"></div>
+
+<script>
+	let themeJson = null;
+	let previewEntries = [];
+
+	// ── File upload ──────────────────────────────────────────────────────────
+
+	const fileInput    = document.getElementById('theme-file');
+	const uploadButton = document.getElementById('upload-button');
+	const fileNameEl   = document.getElementById('file-name');
+	const clearFileBtn = document.getElementById('clear-file');
+	const btnPreview   = document.getElementById('btn-preview');
+	const btnImport    = document.getElementById('btn-import');
+
+	uploadButton.addEventListener('click', () => fileInput.click());
+
+	fileInput.addEventListener('change', async (event) => {
+		const file = event.target.files[0];
+		if (!file) return;
+		try {
+			const content = await file.text();
+			themeJson = JSON.parse(content);
+			fileNameEl.textContent = file.name;
+			clearFileBtn.style.display = 'block';
+			btnPreview.disabled = false;
+			resetState();
+		} catch (err) {
+			fileNameEl.textContent = 'Error reading file — ensure it is valid JSON';
+			themeJson = null;
+			btnPreview.disabled = true;
+		}
+	});
+
+	clearFileBtn.addEventListener('click', () => {
+		fileInput.value = '';
+		fileNameEl.textContent = 'No file chosen';
+		clearFileBtn.style.display = 'none';
+		themeJson = null;
+		previewEntries = [];
+		btnPreview.disabled = true;
+		btnImport.style.display = 'none';
+		resetState();
+	});
+
+	function resetState() {
+		document.getElementById('warnings-panel').style.display = 'none';
+		document.getElementById('result-panel').style.display = 'none';
+		document.getElementById('result-panel').className = 'result-panel';
+		document.getElementById('preview-container').innerHTML =
+			'<div class="empty-state">Choose a theme.json file and click "Preview Import" to see what will be imported.</div>';
+		btnImport.style.display = 'none';
+	}
+
+	// ── Preview ──────────────────────────────────────────────────────────────
+
+	btnPreview.addEventListener('click', () => {
+		if (!themeJson) return;
+		btnPreview.disabled = true;
+		btnPreview.textContent = 'Previewing…';
+		parent.postMessage({ pluginMessage: { type: 'IMPORT_PREVIEW', themeJson } }, '*');
+	});
+
+	// ── Import ───────────────────────────────────────────────────────────────
+
+	btnImport.addEventListener('click', () => {
+		if (!themeJson) return;
+		btnImport.disabled = true;
+		btnImport.textContent = 'Importing…';
+		parent.postMessage({ pluginMessage: { type: 'IMPORT', themeJson } }, '*');
+	});
+
+	// ── Message handler ──────────────────────────────────────────────────────
+
+	window.onmessage = ({ data: { pluginMessage } }) => {
+		if (pluginMessage.type === 'IMPORT_PREVIEW_RESULT') {
+			btnPreview.disabled = false;
+			btnPreview.textContent = 'Preview Import';
+
+			previewEntries = pluginMessage.entries || [];
+			showWarnings(pluginMessage.warnings || []);
+			renderPreview(previewEntries);
+
+			if (previewEntries.length > 0) {
+				btnImport.style.display = 'block';
+				btnImport.disabled = false;
+				btnImport.textContent = 'Import Variables';
+			}
+		}
+
+		if (pluginMessage.type === 'IMPORT_RESULT') {
+			btnImport.disabled = false;
+			btnImport.textContent = 'Import Variables';
+
+			const { created, updated, skipped, warnings } = pluginMessage;
+			showWarnings(warnings || []);
+
+			const panel = document.getElementById('result-panel');
+			const hasError = warnings && warnings.length > 0 && created === 0 && updated === 0;
+			panel.className = 'result-panel ' + (hasError ? 'error' : 'success');
+			panel.style.display = 'block';
+
+			const parts = [];
+			if (created > 0)  parts.push(`${created} variable${created !== 1 ? 's' : ''} created`);
+			if (updated > 0)  parts.push(`${updated} variable${updated !== 1 ? 's' : ''} updated`);
+			if (skipped > 0)  parts.push(`${skipped} skipped`);
+
+			panel.innerHTML = parts.length > 0
+				? `<div class="result-counts">✓ ${parts.join(', ')}.</div>`
+				: `<div class="result-counts">No changes made.</div>`;
+		}
+	};
+
+	// ── Warnings panel ───────────────────────────────────────────────────────
+
+	function showWarnings(warnings) {
+		const panel    = document.getElementById('warnings-panel');
+		const countEl  = document.getElementById('warnings-count');
+		const listEl   = document.getElementById('warnings-list');
+
+		if (!warnings || warnings.length === 0) {
+			panel.style.display = 'none';
+			return;
+		}
+
+		const hasError = warnings.some(w => w.startsWith('Invalid') || w.startsWith('No importable'));
+		countEl.textContent = `${warnings.length} ${warnings.length === 1 ? 'warning' : 'warnings'}`;
+		listEl.innerHTML = '';
+		listEl.style.display = 'none';
+		panel.classList.toggle('has-errors', hasError);
+
+		for (const w of warnings) {
+			const item = document.createElement('div');
+			const isError = w.startsWith('Invalid') || w.startsWith('No importable');
+			item.className = 'warning-item' + (isError ? ' is-error' : '');
+			item.textContent = w;
+			listEl.appendChild(item);
+		}
+
+		panel.style.display = 'block';
+		document.getElementById('warnings-chevron').classList.remove('open');
+	}
+
+	document.getElementById('warnings-header').addEventListener('click', () => {
+		const list    = document.getElementById('warnings-list');
+		const chevron = document.getElementById('warnings-chevron');
+		const open    = getComputedStyle(list).display !== 'none';
+		list.style.display = open ? 'none' : 'block';
+		chevron.classList.toggle('open', !open);
+	});
+
+	// ── Preview renderer ─────────────────────────────────────────────────────
+
+	function figmaColorToCss(c) {
+		const r = Math.round(c.r * 255);
+		const g = Math.round(c.g * 255);
+		const b = Math.round(c.b * 255);
+		if (c.a === 0) return 'transparent';
+		if (c.a >= 1)  return `rgb(${r},${g},${b})`;
+		return `rgba(${r},${g},${b},${c.a.toFixed(2)})`;
+	}
+
+	function formatModeValue(entry, modeName, value) {
+		if (entry.resolvedType === 'COLOR') {
+			const css  = figmaColorToCss(value);
+			const swatch = `<span class="color-swatch" style="background:${css};"></span>`;
+			return `${swatch}${css}`;
+		}
+		if (entry.resolvedType === 'FLOAT') return `${value}px`;
+		const str = String(value);
+		return str.length > 40 ? str.slice(0, 39) + '…' : str;
+	}
+
+	function renderPreview(entries) {
+		const container = document.getElementById('preview-container');
+		container.innerHTML = '';
+
+		if (!entries || entries.length === 0) {
+			container.innerHTML = '<div class="empty-state">No importable entries found.</div>';
+			return;
+		}
+
+		// Group by collection
+		const grouped = new Map();
+		for (const entry of entries) {
+			if (!grouped.has(entry.collection)) grouped.set(entry.collection, []);
+			grouped.get(entry.collection).push(entry);
+		}
+
+		// Summary
+		const total = entries.length;
+		const colCount = grouped.size;
+		const summary = document.createElement('div');
+		summary.className = 'preview-summary';
+		summary.innerHTML = `<strong>${total}</strong> variable${total !== 1 ? 's' : ''} across <strong>${colCount}</strong> collection${colCount !== 1 ? 's' : ''} will be imported.`;
+		container.appendChild(summary);
+
+		// Collection groups
+		for (const [collectionName, collectionEntries] of grouped) {
+			const group = document.createElement('div');
+			group.className = 'collection-group';
+
+			const header = document.createElement('div');
+			header.className = 'collection-header';
+			header.innerHTML = `<span>${collectionName}</span><span class="collection-count">${collectionEntries.length} variable${collectionEntries.length !== 1 ? 's' : ''}</span>`;
+			group.appendChild(header);
+
+			const table = document.createElement('table');
+			table.className = 'entry-table';
+
+			for (const entry of collectionEntries) {
+				const tr = document.createElement('tr');
+
+				// Variable name
+				const tdName = document.createElement('td');
+				tdName.className = 'entry-name';
+				tdName.textContent = entry.variableName;
+
+				// Type badge
+				const tdType = document.createElement('td');
+				const badge = document.createElement('span');
+				badge.className = `entry-type type-${entry.resolvedType.toLowerCase()}`;
+				badge.textContent = entry.resolvedType;
+				tdType.appendChild(badge);
+
+				// Value(s)
+				const tdValue = document.createElement('td');
+				tdValue.className = 'entry-value';
+				const modeNames = Object.keys(entry.modes);
+
+				if (modeNames.length === 1) {
+					const val = entry.modes[modeNames[0]];
+					tdValue.innerHTML = formatModeValue(entry, modeNames[0], val);
+				} else {
+					const modesDiv = document.createElement('div');
+					modesDiv.className = 'entry-modes';
+					for (const modeName of modeNames) {
+						const row = document.createElement('div');
+						row.className = 'mode-row';
+						row.innerHTML = `<span class="mode-label">${modeName}:</span> ${formatModeValue(entry, modeName, entry.modes[modeName])}`;
+						modesDiv.appendChild(row);
+					}
+					tdValue.appendChild(modesDiv);
+				}
+
+				tr.appendChild(tdName);
+				tr.appendChild(tdType);
+				tr.appendChild(tdValue);
+				table.appendChild(tr);
+			}
+
+			group.appendChild(table);
+			container.appendChild(group);
+		}
+	}
+
+	// ── Resize handle ────────────────────────────────────────────────────────
+
+	const resizeHandle  = document.getElementById('resize-handle');
+	const resizeOverlay = document.getElementById('resize-overlay');
+	let isResizing = false, initialWidth, initialHeight, initialX, initialY;
+
+	resizeHandle.addEventListener('mousedown', e => {
+		e.preventDefault();
+		initialWidth = window.innerWidth; initialHeight = window.innerHeight;
+		initialX = e.clientX; initialY = e.clientY;
+		resizeOverlay.style.display = 'block';
+		isResizing = true;
+		window.addEventListener('mousemove', onResize);
+		window.addEventListener('mouseup', stopResize);
+	});
+
+	function onResize(e) {
+		if (!isResizing) return;
+		parent.postMessage({ pluginMessage: {
+			type: 'RESIZE',
+			width:  Math.max(300, initialWidth  + (e.clientX - initialX)),
+			height: Math.max(300, initialHeight + (e.clientY - initialY)),
+		}}, '*');
+	}
+
+	function stopResize() {
+		isResizing = false;
+		resizeOverlay.style.display = 'none';
+		window.removeEventListener('mousemove', onResize);
+		window.removeEventListener('mouseup', stopResize);
+	}
+</script>
