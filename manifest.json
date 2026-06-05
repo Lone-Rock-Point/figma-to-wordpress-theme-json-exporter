@@ -7,10 +7,12 @@
   "main": "dist/code.js",
   "networkAccess": { "allowedDomains": ["https://cdnjs.cloudflare.com"] },
   "menu": [
-    { "command": "export", "name": "Export to theme.json" }
+    { "command": "export", "name": "Export to theme.json" },
+    { "command": "import", "name": "Import from theme.json" }
   ],
   "ui": {
-    "export": "export.html"
+    "export": "export.html",
+    "import": "import.html"
   },
   "documentAccess": "dynamic-page"
 }
