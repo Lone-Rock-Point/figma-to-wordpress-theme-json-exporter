@@ -32,9 +32,13 @@ figma.ui.onmessage = async (e) => {
 
 	} else if (e.type === "IMPORT") {
 		try {
-			const { entries } = parseThemeJson(e.themeJson);
+			const { entries, warnings: parseWarnings } = parseThemeJson(e.themeJson);
 			const result = await writeImportEntries(entries);
-			figma.ui.postMessage({ type: "IMPORT_RESULT", ...result });
+			figma.ui.postMessage({
+				type: "IMPORT_RESULT",
+				...result,
+				warnings: [...parseWarnings, ...result.warnings],
+			});
 		} catch (error) {
 			figma.ui.postMessage({
 				type: "IMPORT_RESULT",

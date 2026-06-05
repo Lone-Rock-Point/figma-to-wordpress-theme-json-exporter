@@ -1,10 +1,13 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { mockFigma } from '../test-setup';
 import {
 	parseColor,
 	parsePx,
 	parseFluidSpacing,
 	parseCustomValue,
 	parseThemeJson,
+	writeImportEntries,
+	type ImportEntry,
 } from './index';
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -69,6 +72,14 @@ describe('parsePx', () => {
 		expect(parsePx(undefined)).toBeNull();
 		expect(parsePx('')).toBeNull();
 	});
+
+	it('rejects multi-dot strings like "1.2.3px"', () => {
+		expect(parsePx('1.2.3px')).toBeNull();
+	});
+
+	it('trims whitespace before parsing', () => {
+		expect(parsePx('  16px  ')).toBe(16);
+	});
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -85,6 +96,11 @@ describe('parseFluidSpacing', () => {
 		// 1rem * 16 = 16px, etc — check a less round number
 		const result = parseFluidSpacing('min(0.625rem, 1.5vw)');
 		expect(result).toEqual({ desktop: 10, vw: 1.5 });
+	});
+
+	it('tolerates optional whitespace inside min()', () => {
+		expect(parseFluidSpacing('min( 1.5rem, 3vw )')).toEqual({ desktop: 24, vw: 3 });
+		expect(parseFluidSpacing('min(2rem , 4vw)')).toEqual({ desktop: 32, vw: 4 });
 	});
 
 	it('returns null for non-fluid values', () => {
@@ -356,5 +372,196 @@ describe('parseThemeJson', () => {
 		expect(collections).toContain('settings [static]');
 		expect(collections).toContain('settings [custom]');
 		expect(collections).toContain('styles');
+	});
+
+	// --- slug validation ---
+
+	it('warns and skips palette entries with missing slug', () => {
+		const { entries, warnings } = parseThemeJson({
+			settings: { color: { palette: [{ color: '#ff0000' }] } },
+		});
+		expect(entries).toHaveLength(0);
+		expect(warnings.some(w => w.includes('missing or invalid slug'))).toBe(true);
+	});
+
+	it('warns and skips font size entries with missing slug', () => {
+		const { entries, warnings } = parseThemeJson({
+			settings: { typography: { fontSizes: [{ size: '16px' }] } },
+		});
+		expect(entries).toHaveLength(0);
+		expect(warnings.some(w => w.includes('missing or invalid slug'))).toBe(true);
+	});
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// writeImportEntries
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('writeImportEntries', () => {
+	const makeCollection = (overrides: Record<string, any> = {}) => ({
+		id: 'col1',
+		name: 'settings [color]',
+		variableIds: [],
+		modes: [{ modeId: 'm1', name: 'Default' }],
+		renameMode: vi.fn(),
+		addMode: vi.fn().mockReturnValue('m2'),
+		...overrides,
+	});
+
+	const makeVariable = (overrides: Record<string, any> = {}) => ({
+		name: 'palette/primary',
+		resolvedType: 'COLOR',
+		setValueForMode: vi.fn(),
+		...overrides,
+	});
+
+	beforeEach(() => {
+		vi.clearAllMocks();
+	});
+
+	it('creates a new variable in an existing collection', async () => {
+		const collection = makeCollection({ variableIds: [] });
+		const newVar = makeVariable();
+		mockFigma.variables.getLocalVariableCollectionsAsync.mockResolvedValue([collection]);
+		mockFigma.variables.createVariable.mockReturnValue(newVar);
+
+		const entries: ImportEntry[] = [{
+			collection: 'settings [color]',
+			variableName: 'palette/primary',
+			resolvedType: 'COLOR',
+			modes: { Default: { r: 1, g: 0, b: 0, a: 1 } },
+		}];
+
+		const result = await writeImportEntries(entries);
+
+		expect(mockFigma.variables.createVariable).toHaveBeenCalledWith('palette/primary', collection, 'COLOR');
+		expect(newVar.setValueForMode).toHaveBeenCalledWith('m1', { r: 1, g: 0, b: 0, a: 1 });
+		expect(result).toMatchObject({ created: 1, updated: 0, skipped: 0 });
+	});
+
+	it('updates an existing variable', async () => {
+		const existingVar = makeVariable();
+		const collection = makeCollection({ variableIds: ['v1'] });
+		mockFigma.variables.getLocalVariableCollectionsAsync.mockResolvedValue([collection]);
+		mockFigma.variables.getVariableByIdAsync.mockResolvedValue(existingVar);
+
+		const entries: ImportEntry[] = [{
+			collection: 'settings [color]',
+			variableName: 'palette/primary',
+			resolvedType: 'COLOR',
+			modes: { Default: { r: 0, g: 0, b: 1, a: 1 } },
+		}];
+
+		const result = await writeImportEntries(entries);
+
+		expect(mockFigma.variables.createVariable).not.toHaveBeenCalled();
+		expect(existingVar.setValueForMode).toHaveBeenCalledWith('m1', { r: 0, g: 0, b: 1, a: 1 });
+		expect(result).toMatchObject({ created: 0, updated: 1, skipped: 0 });
+	});
+
+	it('skips a variable when the existing type does not match', async () => {
+		const existingVar = makeVariable({ resolvedType: 'STRING' }); // existing is STRING
+		const collection = makeCollection({ variableIds: ['v1'] });
+		mockFigma.variables.getLocalVariableCollectionsAsync.mockResolvedValue([collection]);
+		mockFigma.variables.getVariableByIdAsync.mockResolvedValue(existingVar);
+
+		const entries: ImportEntry[] = [{
+			collection: 'settings [color]',
+			variableName: 'palette/primary',
+			resolvedType: 'COLOR', // import wants COLOR
+			modes: { Default: { r: 1, g: 0, b: 0, a: 1 } },
+		}];
+
+		const result = await writeImportEntries(entries);
+
+		expect(existingVar.setValueForMode).not.toHaveBeenCalled();
+		expect(result).toMatchObject({ skipped: 1 });
+		expect(result.warnings.some(w => w.includes('does not match'))).toBe(true);
+	});
+
+	it('creates a new collection when none exists', async () => {
+		const newCollection = makeCollection({ variableIds: [] });
+		const newVar = makeVariable();
+		mockFigma.variables.getLocalVariableCollectionsAsync.mockResolvedValue([]);
+		mockFigma.variables.createVariableCollection.mockReturnValue(newCollection);
+		mockFigma.variables.createVariable.mockReturnValue(newVar);
+
+		const entries: ImportEntry[] = [{
+			collection: 'settings [color]',
+			variableName: 'palette/primary',
+			resolvedType: 'COLOR',
+			modes: { Default: { r: 1, g: 0, b: 0, a: 1 } },
+		}];
+
+		await writeImportEntries(entries);
+
+		expect(mockFigma.variables.createVariableCollection).toHaveBeenCalledWith('settings [color]');
+		expect(mockFigma.variables.createVariable).toHaveBeenCalled();
+		expect(newVar.setValueForMode).toHaveBeenCalled();
+	});
+
+	it('does not overwrite existing-variable mode values for modes not in the import', async () => {
+		// Collection has two modes: Default and Dark
+		const existingVar = makeVariable();
+		const collection = makeCollection({
+			variableIds: ['v1'],
+			modes: [
+				{ modeId: 'm1', name: 'Default' },
+				{ modeId: 'm2', name: 'Dark' },
+			],
+		});
+		mockFigma.variables.getLocalVariableCollectionsAsync.mockResolvedValue([collection]);
+		mockFigma.variables.getVariableByIdAsync.mockResolvedValue(existingVar);
+
+		// Import only provides Default mode
+		const entries: ImportEntry[] = [{
+			collection: 'settings [color]',
+			variableName: 'palette/primary',
+			resolvedType: 'COLOR',
+			modes: { Default: { r: 1, g: 0, b: 0, a: 1 } },
+		}];
+
+		await writeImportEntries(entries);
+
+		// Should only be called once (for Default), NOT for Dark
+		expect(existingVar.setValueForMode).toHaveBeenCalledTimes(1);
+		expect(existingVar.setValueForMode).toHaveBeenCalledWith('m1', { r: 1, g: 0, b: 0, a: 1 });
+	});
+
+	it('finds existing collections case-insensitively and trims whitespace', async () => {
+		const collection = makeCollection({ name: 'Settings [Color] ', variableIds: [] });
+		const newVar = makeVariable();
+		mockFigma.variables.getLocalVariableCollectionsAsync.mockResolvedValue([collection]);
+		mockFigma.variables.createVariable.mockReturnValue(newVar);
+
+		const entries: ImportEntry[] = [{
+			collection: 'settings [color]',
+			variableName: 'palette/primary',
+			resolvedType: 'COLOR',
+			modes: { Default: { r: 1, g: 0, b: 0, a: 1 } },
+		}];
+
+		await writeImportEntries(entries);
+
+		// Should reuse the existing collection, not create a new one
+		expect(mockFigma.variables.createVariableCollection).not.toHaveBeenCalled();
+	});
+
+	it('warns and counts skipped when createVariable throws', async () => {
+		const collection = makeCollection({ variableIds: [] });
+		mockFigma.variables.getLocalVariableCollectionsAsync.mockResolvedValue([collection]);
+		mockFigma.variables.createVariable.mockImplementation(() => { throw new Error('API error'); });
+
+		const entries: ImportEntry[] = [{
+			collection: 'settings [color]',
+			variableName: 'palette/bad',
+			resolvedType: 'COLOR',
+			modes: { Default: { r: 1, g: 0, b: 0, a: 1 } },
+		}];
+
+		const result = await writeImportEntries(entries);
+
+		expect(result.skipped).toBe(1);
+		expect(result.warnings.some(w => w.includes('Could not create'))).toBe(true);
 	});
 });

@@ -55,17 +55,23 @@ export function parseColor(value: string): FigmaColor | null {
 	return null;
 }
 
-/** Strip 'px' unit and return the number, or null if not parseable. */
+/**
+ * Strip 'px' unit and return the number, or null if not parseable.
+ * Rejects multi-dot strings like "1.2.3px".
+ */
 export function parsePx(value: string | undefined): number | null {
 	if (!value || typeof value !== 'string') return null;
-	const m = value.match(/^([\d.]+)px$/);
+	const m = value.trim().match(/^(\d+(?:\.\d+)?)px$/);
 	return m ? parseFloat(m[1]) : null;
 }
 
-/** Parse min(Xrem, Yvw) spacing syntax → { desktop: px, vw: number }. */
+/**
+ * Parse min(Xrem, Yvw) spacing syntax → { desktop: px, vw: number }.
+ * Tolerates optional whitespace inside the expression.
+ */
 export function parseFluidSpacing(value: string | undefined): { desktop: number; vw: number } | null {
 	if (!value) return null;
-	const m = value.match(/^min\(([\d.]+)rem,\s*([\d.]+)vw\)$/);
+	const m = value.trim().match(/^min\(\s*(\d+(?:\.\d+)?)rem\s*,\s*(\d+(?:\.\d+)?)vw\s*\)$/);
 	if (!m) return null;
 	const rem = parseFloat(m[1]);
 	const vw = parseFloat(m[2]);
@@ -132,6 +138,11 @@ export function parseThemeJson(theme: any): ParseResult {
 	const palette = theme.settings?.color?.palette;
 	if (Array.isArray(palette)) {
 		for (const item of palette) {
+			// Validate required fields before creating an entry
+			if (!item.slug || typeof item.slug !== 'string') {
+				warnings.push(`settings [color]: Skipping palette entry — missing or invalid slug.`);
+				continue;
+			}
 			const color = parseColor(item.color);
 			if (color) {
 				entries.push({
@@ -153,6 +164,10 @@ export function parseThemeJson(theme: any): ParseResult {
 	const fontSizes = theme.settings?.typography?.fontSizes;
 	if (Array.isArray(fontSizes)) {
 		for (const item of fontSizes) {
+			if (!item.slug || typeof item.slug !== 'string') {
+				warnings.push(`settings [fluid]: Skipping font size entry — missing or invalid slug.`);
+				continue;
+			}
 			const desktop = parsePx(item.fluid?.max ?? item.size);
 			const mobile = parsePx(item.fluid?.min);
 			if (desktop === null) {
@@ -174,6 +189,10 @@ export function parseThemeJson(theme: any): ParseResult {
 	const spacingSizes = theme.settings?.spacing?.spacingSizes;
 	if (Array.isArray(spacingSizes)) {
 		for (const item of spacingSizes) {
+			if (!item.slug || typeof item.slug !== 'string') {
+				warnings.push(`settings [fluid]: Skipping spacing size entry — missing or invalid slug.`);
+				continue;
+			}
 			const parsed = parseFluidSpacing(item.size);
 			if (!parsed) {
 				warnings.push(`settings [fluid]: Could not parse spacing size "${item.size}" for slug "${item.slug}" — skipped.`);
@@ -192,6 +211,10 @@ export function parseThemeJson(theme: any): ParseResult {
 	const radiusSizes = theme.settings?.border?.radiusSizes;
 	if (Array.isArray(radiusSizes)) {
 		for (const item of radiusSizes) {
+			if (!item.slug || typeof item.slug !== 'string') {
+				warnings.push(`settings [static]: Skipping border radius entry — missing or invalid slug.`);
+				continue;
+			}
 			const value = parsePx(item.size);
 			if (value === null) {
 				warnings.push(`settings [static]: Could not parse border radius "${item.size}" for slug "${item.slug}" — skipped.`);
@@ -210,6 +233,10 @@ export function parseThemeJson(theme: any): ParseResult {
 	const aspectRatios = theme.settings?.dimensions?.aspectRatios;
 	if (Array.isArray(aspectRatios)) {
 		for (const item of aspectRatios) {
+			if (!item.slug || typeof item.slug !== 'string') {
+				warnings.push(`settings [static]: Skipping aspect ratio entry — missing or invalid slug.`);
+				continue;
+			}
 			entries.push({
 				collection: 'settings [static]',
 				variableName: `dimensions/aspect-ratios/${item.slug}`,
@@ -223,6 +250,10 @@ export function parseThemeJson(theme: any): ParseResult {
 	const shadowPresets = theme.settings?.shadow?.presets;
 	if (Array.isArray(shadowPresets)) {
 		for (const item of shadowPresets) {
+			if (!item.slug || typeof item.slug !== 'string') {
+				warnings.push(`settings [static]: Skipping shadow preset entry — missing or invalid slug.`);
+				continue;
+			}
 			entries.push({
 				collection: 'settings [static]',
 				variableName: `shadow/presets/${item.slug}`,
@@ -255,7 +286,7 @@ export function parseThemeJson(theme: any): ParseResult {
 
 const DEFAULT_MODE_NAME = 'Default';
 
-/** Default fallback values when a variable has no value for a given mode. */
+/** Default fallback values for newly-created variables that need a value for every mode. */
 function defaultValue(resolvedType: ImportEntry['resolvedType']): FigmaColor | number | string {
 	if (resolvedType === 'COLOR') return { r: 0, g: 0, b: 0, a: 1 };
 	if (resolvedType === 'FLOAT') return 0;
@@ -266,7 +297,8 @@ export async function writeImportEntries(entries: ImportEntry[]): Promise<WriteR
 	const existingCollections = await figma.variables.getLocalVariableCollectionsAsync();
 	const collectionByName = new Map<string, any>();
 	for (const col of existingCollections) {
-		collectionByName.set(col.name.toLowerCase(), col);
+		// Trim + lowercase to match export convention and handle minor whitespace differences
+		collectionByName.set(col.name.toLowerCase().trim(), col);
 	}
 
 	let created = 0;
@@ -284,7 +316,7 @@ export async function writeImportEntries(entries: ImportEntry[]): Promise<WriteR
 
 	for (const [collectionName, collectionEntries] of byCollection) {
 		// --- Get or create collection ---
-		let collection = collectionByName.get(collectionName.toLowerCase());
+		let collection = collectionByName.get(collectionName.toLowerCase().trim());
 		let isNewCollection = false;
 		if (!collection) {
 			collection = figma.variables.createVariableCollection(collectionName);
@@ -299,7 +331,7 @@ export async function writeImportEntries(entries: ImportEntry[]): Promise<WriteR
 			}
 		}
 
-		// Build current mode map (name → modeId)
+		// Build current mode map (lowercase name → modeId)
 		const refreshModeMap = () =>
 			new Map<string, string>(collection.modes.map((m: any) => [m.name.toLowerCase(), m.modeId]));
 
@@ -327,12 +359,21 @@ export async function writeImportEntries(entries: ImportEntry[]): Promise<WriteR
 			modeMap = refreshModeMap();
 		}
 
-		// --- Build existing variable map (name → variable) ---
+		// --- Build existing variable map in parallel (name → variable) ---
+		const fetchedVars = await Promise.all(
+			collection.variableIds.map((id: string) => figma.variables.getVariableByIdAsync(id))
+		);
 		const existingVars = new Map<string, any>();
-		for (const varId of collection.variableIds) {
-			const v = await figma.variables.getVariableByIdAsync(varId);
+		for (const v of fetchedVars) {
 			if (v) existingVars.set(v.name, v);
 		}
+
+		// Track which mode IDs existed before this import (used to decide default-fill scope)
+		const preExistingModeIds = new Set(
+			existingCollections
+				.find((c: any) => c.id === collection.id)
+				?.modes.map((m: any) => m.modeId) ?? []
+		);
 
 		// --- Create or update each variable ---
 		for (const entry of collectionEntries) {
@@ -353,7 +394,7 @@ export async function writeImportEntries(entries: ImportEntry[]): Promise<WriteR
 				continue;
 			}
 
-			// Set value for each mode
+			// Set value for each mode explicitly provided by the import
 			let anySet = false;
 			for (const [modeName, value] of Object.entries(entry.modes)) {
 				const modeId = modeMap.get(modeName.toLowerCase());
@@ -369,14 +410,32 @@ export async function writeImportEntries(entries: ImportEntry[]): Promise<WriteR
 				}
 			}
 
-			// Fill any modes that have no value with a safe default
-			for (const [lowerName, modeId] of modeMap) {
-				const hasValue = Object.keys(entry.modes).some(m => m.toLowerCase() === lowerName);
-				if (!hasValue) {
-					try {
-						variable.setValueForMode(modeId, defaultValue(entry.resolvedType));
-					} catch (_) {
-						// best-effort; don't warn for default fills
+			// For NEW variables only: fill newly-added modes with safe defaults so Figma's
+			// all-modes requirement is satisfied. Never fill defaults for existing variables
+			// to avoid overwriting values the user hasn't asked to change.
+			if (isNew) {
+				for (const [lowerName, modeId] of modeMap) {
+					const providedByImport = Object.keys(entry.modes).some(m => m.toLowerCase() === lowerName);
+					if (!providedByImport) {
+						try {
+							variable.setValueForMode(modeId, defaultValue(entry.resolvedType));
+						} catch (_) {
+							// best-effort; don't warn for default fills
+						}
+					}
+				}
+			} else {
+				// For existing variables: only fill defaults for modes that were newly added
+				// during this import run (i.e. didn't exist before we started).
+				for (const [lowerName, modeId] of modeMap) {
+					if (preExistingModeIds.has(modeId)) continue; // mode existed before — don't touch
+					const providedByImport = Object.keys(entry.modes).some(m => m.toLowerCase() === lowerName);
+					if (!providedByImport) {
+						try {
+							variable.setValueForMode(modeId, defaultValue(entry.resolvedType));
+						} catch (_) {
+							// best-effort
+						}
 					}
 				}
 			}

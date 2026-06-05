@@ -507,15 +507,29 @@
 		return `rgba(${r},${g},${b},${c.a.toFixed(2)})`;
 	}
 
+	function escapeHtml(str) {
+		return String(str)
+			.replace(/&/g, '&amp;')
+			.replace(/</g, '&lt;')
+			.replace(/>/g, '&gt;')
+			.replace(/"/g, '&quot;')
+			.replace(/'/g, '&#39;');
+	}
+
 	function formatModeValue(entry, modeName, value) {
 		if (entry.resolvedType === 'COLOR') {
-			const css  = figmaColorToCss(value);
+			const css    = figmaColorToCss(value);
+			// css is constructed from numbers/keywords — safe to interpolate directly
 			const swatch = `<span class="color-swatch" style="background:${css};"></span>`;
-			return `${swatch}${css}`;
+			return `${swatch}${escapeHtml(css)}`;
 		}
-		if (entry.resolvedType === 'FLOAT') return `${value}px`;
+		if (entry.resolvedType === 'FLOAT') {
+			// vw mode values represent viewport-width units, not pixels
+			const unit = modeName.toLowerCase() === 'vw' ? 'vw' : 'px';
+			return escapeHtml(`${value}${unit}`);
+		}
 		const str = String(value);
-		return str.length > 40 ? str.slice(0, 39) + '…' : str;
+		return escapeHtml(str.length > 40 ? str.slice(0, 39) + '…' : str);
 	}
 
 	function renderPreview(entries) {
