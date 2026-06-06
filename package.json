@@ -22,8 +22,8 @@
 	],
 	"main": "code.js",
 	"scripts": {
-		"build": "webpack",
-		"watch": "npm run build -- --watch",
+		"build": "webpack --mode production",
+		"watch": "webpack --mode development --watch",
 		"lint": "eslint src --ext .ts",
 		"lint:fix": "eslint src --ext .ts --fix",
 		"lint:types": "tsc --noEmit",
