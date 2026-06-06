@@ -351,14 +351,13 @@ async function resolveVarRef(
 	localCollections: any[],
 	cache: Map<string, Map<string, string>>,
 ): Promise<string | null> {
-	// Helper: narrow to collections whose name matches the expected prefix
-	const isRelevant = (name: string) =>
-		cssVar.startsWith('var(--token--')
-			? name.toLowerCase().trim().startsWith('!-usa')
-			: true; // search everything for other prefixes
+	// We do NOT filter by collection name — the variable group prefix (e.g. "!-usa/")
+	// may differ from the collection name (e.g. "Color"). transformTokenReference
+	// handles variable-name prefixes internally, so we let the cached lookup do the
+	// matching across every collection.
 
 	// 1. Local collections
-	for (const col of localCollections.filter(c => isRelevant(c.name))) {
+	for (const col of localCollections) {
 		if (!cache.has(col.id)) {
 			cache.set(col.id, await buildCollectionVarLookup(col));
 		}
@@ -375,7 +374,7 @@ async function resolveVarRef(
 		return null;
 	}
 
-	for (const libCol of libCollections.filter(c => isRelevant(c.name))) {
+	for (const libCol of libCollections) {
 		const cacheKey = `lib:${libCol.key}`;
 		if (!cache.has(cacheKey)) {
 			const libVars = await figma.teamLibrary.getVariablesInLibraryCollectionAsync(libCol.key);
