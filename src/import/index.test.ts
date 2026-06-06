@@ -609,7 +609,7 @@ describe('writeImportEntries', () => {
 
 	it('resolves a VarAliasRef to a VARIABLE_ALIAS when the target collection exists locally', async () => {
 		const colorCollection = makeCollection({ id: 'col-color', variableIds: [] });
-		// USWDS source collection with a single variable
+		// USWDS source collection present locally
 		const uswdsCollection = {
 			id: 'col-uswds',
 			name: '!-usa',
@@ -626,6 +626,8 @@ describe('writeImportEntries', () => {
 			id === 'uswds-v1' ? uswdsVar : null
 		);
 		mockFigma.variables.createVariable.mockReturnValue(newVar);
+		// Library path should not be reached
+		mockFigma.teamLibrary.getAvailableLibraryVariableCollectionsAsync.mockResolvedValue([]);
 
 		const aliasEntry: ImportEntry = {
 			collection: 'settings [color]',
@@ -640,13 +642,45 @@ describe('writeImportEntries', () => {
 		expect(result).toMatchObject({ created: 1, updated: 0, skipped: 0, warnings: [] });
 	});
 
-	it('warns when a VarAliasRef target cannot be found in any local collection', async () => {
+	it('resolves a VarAliasRef from a team library when not found locally', async () => {
 		const colorCollection = makeCollection({ variableIds: [] });
 		const newVar = makeVariable({ name: 'palette/orange' });
 
-		// No USWDS collection present — resolveVarRef should return null
+		// No local USWDS collection
 		mockFigma.variables.getLocalVariableCollectionsAsync.mockResolvedValue([colorCollection]);
 		mockFigma.variables.createVariable.mockReturnValue(newVar);
+
+		// Library has a !-usa collection containing the target variable
+		const libCollection = { key: 'lib-col-key', name: '!-usa', libraryName: 'USWDS Tokens' };
+		const libVar = { key: 'lib-var-key', name: 'color/orange-50v', resolvedType: 'COLOR' };
+		const importedVar = { id: 'imported-var-id' };
+
+		mockFigma.teamLibrary.getAvailableLibraryVariableCollectionsAsync.mockResolvedValue([libCollection]);
+		mockFigma.teamLibrary.getVariablesInLibraryCollectionAsync.mockResolvedValue([libVar]);
+		mockFigma.variables.importVariableByKeyAsync.mockResolvedValue(importedVar);
+
+		const aliasEntry: ImportEntry = {
+			collection: 'settings [color]',
+			variableName: 'palette/orange',
+			resolvedType: 'COLOR',
+			modes: { Default: { type: 'VAR_ALIAS', cssVar: 'var(--token--color--orange-50v)' } as VarAliasRef },
+		};
+
+		const result = await writeImportEntries([aliasEntry]);
+
+		expect(mockFigma.variables.importVariableByKeyAsync).toHaveBeenCalledWith('lib-var-key');
+		expect(newVar.setValueForMode).toHaveBeenCalledWith('m1', { type: 'VARIABLE_ALIAS', id: 'imported-var-id' });
+		expect(result).toMatchObject({ created: 1, updated: 0, skipped: 0, warnings: [] });
+	});
+
+	it('warns when a VarAliasRef target cannot be found in local or library collections', async () => {
+		const colorCollection = makeCollection({ variableIds: [] });
+		const newVar = makeVariable({ name: 'palette/orange' });
+
+		// No USWDS collection anywhere
+		mockFigma.variables.getLocalVariableCollectionsAsync.mockResolvedValue([colorCollection]);
+		mockFigma.variables.createVariable.mockReturnValue(newVar);
+		mockFigma.teamLibrary.getAvailableLibraryVariableCollectionsAsync.mockResolvedValue([]);
 
 		const aliasEntry: ImportEntry = {
 			collection: 'settings [color]',

@@ -337,27 +337,62 @@ async function buildCollectionVarLookup(collection: any): Promise<Map<string, st
 
 /**
  * Find the Figma variable ID that corresponds to the given CSS var string.
- * Searches local collections, prioritising those likely to contain the var
- * (e.g. '!-usa' for var(--token--...) references).
- * Results are cached in `cache` to avoid redundant API calls.
+ *
+ * Search order:
+ *   1. Local collections (fast, no extra API calls beyond variable fetch)
+ *   2. Team library collections (requires "teamlibrary" permission; library
+ *      variables are imported via importVariableByKeyAsync so they can be
+ *      referenced as aliases even though they live outside the local file).
+ *
+ * Results are cached in `cache` to avoid redundant API calls across entries.
  */
 async function resolveVarRef(
 	cssVar: string,
-	allCollections: any[],
+	localCollections: any[],
 	cache: Map<string, Map<string, string>>,
 ): Promise<string | null> {
-	// Narrow the search: USWDS tokens always live in '!-usa' collections
-	const prioritized = cssVar.startsWith('var(--token--')
-		? allCollections.filter(c => c.name.toLowerCase().trim().startsWith('!-usa'))
-		: allCollections;
+	// Helper: narrow to collections whose name matches the expected prefix
+	const isRelevant = (name: string) =>
+		cssVar.startsWith('var(--token--')
+			? name.toLowerCase().trim().startsWith('!-usa')
+			: true; // search everything for other prefixes
 
-	for (const col of prioritized) {
+	// 1. Local collections
+	for (const col of localCollections.filter(c => isRelevant(c.name))) {
 		if (!cache.has(col.id)) {
 			cache.set(col.id, await buildCollectionVarLookup(col));
 		}
 		const id = cache.get(col.id)!.get(cssVar);
 		if (id) return id;
 	}
+
+	// 2. Team library collections (permission: "teamlibrary")
+	let libCollections: any[];
+	try {
+		libCollections = await figma.teamLibrary.getAvailableLibraryVariableCollectionsAsync();
+	} catch {
+		// API unavailable (older client) or permission not granted
+		return null;
+	}
+
+	for (const libCol of libCollections.filter(c => isRelevant(c.name))) {
+		const cacheKey = `lib:${libCol.key}`;
+		if (!cache.has(cacheKey)) {
+			const libVars = await figma.teamLibrary.getVariablesInLibraryCollectionAsync(libCol.key);
+			const lookup = new Map<string, string>();
+			for (const v of libVars) {
+				lookup.set(transformTokenReference(libCol.name, v.name), v.key);
+			}
+			cache.set(cacheKey, lookup);
+		}
+		const varKey = cache.get(cacheKey)!.get(cssVar);
+		if (varKey) {
+			// Import the library variable into the local file to obtain a stable ID
+			const imported = await figma.variables.importVariableByKeyAsync(varKey);
+			return imported?.id ?? null;
+		}
+	}
+
 	return null;
 }
 
