@@ -57,15 +57,15 @@ figma.ui.onmessage = async (e) => {
 	}
 };
 
-if (figma.command === "import") {
-	figma.showUI(__uiFiles__["import"], {
+if (figma.command === "importJson") {
+	figma.showUI(__uiFiles__["importJson"], {
 		width: 500,
 		height: 500,
 		themeColors: true,
 	});
 } else {
 	// default: export
-	figma.showUI(__uiFiles__["export"], {
+	figma.showUI(__uiFiles__["exportJson"], {
 		width: 500,
 		height: 500,
 		themeColors: true,
