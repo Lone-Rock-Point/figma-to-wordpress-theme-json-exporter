@@ -484,6 +484,32 @@ export async function writeImportEntries(entries: ImportEntry[]): Promise<WriteR
 
 		// --- Create or update each variable ---
 		for (const entry of collectionEntries) {
+			// Pre-resolve all VarAliasRef values BEFORE touching Figma so we never
+			// create a variable we can't fully populate. If any alias target is missing
+			// (library not enabled, collection not present), skip the entire entry.
+			const resolvedModes: Record<string, any> = {};
+			let hasUnresolvableAlias = false;
+			for (const [modeName, value] of Object.entries(entry.modes)) {
+				if (isVarAliasRef(value)) {
+					const targetId = await resolveVarRef(value.cssVar, existingCollections, varLookupCache);
+					if (!targetId) {
+						warnings.push(
+							`Skipping "${entry.variableName}" — could not resolve "${value.cssVar}". ` +
+							`Enable the library that contains this variable in your Figma file, then re-import.`
+						);
+						hasUnresolvableAlias = true;
+						break;
+					}
+					resolvedModes[modeName] = { type: 'VARIABLE_ALIAS', id: targetId };
+				} else {
+					resolvedModes[modeName] = value;
+				}
+			}
+			if (hasUnresolvableAlias) {
+				skipped++;
+				continue;
+			}
+
 			let variable = existingVars.get(entry.variableName);
 			const isNew = !variable;
 
@@ -503,28 +529,12 @@ export async function writeImportEntries(entries: ImportEntry[]): Promise<WriteR
 
 			// Set value for each mode explicitly provided by the import
 			let anySet = false;
-			for (const [modeName, value] of Object.entries(entry.modes)) {
+			for (const [modeName, setVal] of Object.entries(resolvedModes)) {
 				const modeId = modeMap.get(modeName.toLowerCase());
 				if (!modeId) {
 					warnings.push(`Mode "${modeName}" not found in collection "${collectionName}" for variable "${entry.variableName}".`);
 					continue;
 				}
-
-				// Resolve VarAliasRef → Figma VariableAlias before setting
-				let setVal: any = value;
-				if (isVarAliasRef(value)) {
-					const targetId = await resolveVarRef(value.cssVar, existingCollections, varLookupCache);
-					if (targetId) {
-						setVal = { type: 'VARIABLE_ALIAS', id: targetId };
-					} else {
-						warnings.push(
-							`Could not resolve "${value.cssVar}" to a local Figma variable for "${entry.variableName}" [${modeName}]. ` +
-							`Ensure the target collection (e.g. "!-usa") exists in this file.`
-						);
-						continue;
-					}
-				}
-
 				try {
 					variable.setValueForMode(modeId, setVal);
 					anySet = true;
@@ -536,10 +546,10 @@ export async function writeImportEntries(entries: ImportEntry[]): Promise<WriteR
 			// For NEW variables only: fill newly-added modes with safe defaults so Figma's
 			// all-modes requirement is satisfied. Never fill defaults for existing variables
 			// to avoid overwriting values the user hasn't asked to change.
+			const providedModeNames = new Set(Object.keys(resolvedModes).map(m => m.toLowerCase()));
 			if (isNew) {
 				for (const [lowerName, modeId] of modeMap) {
-					const providedByImport = Object.keys(entry.modes).some(m => m.toLowerCase() === lowerName);
-					if (!providedByImport) {
+					if (!providedModeNames.has(lowerName)) {
 						try {
 							variable.setValueForMode(modeId, defaultValue(entry.resolvedType));
 						} catch (_) {
@@ -552,8 +562,7 @@ export async function writeImportEntries(entries: ImportEntry[]): Promise<WriteR
 				// during this import run (i.e. didn't exist before we started).
 				for (const [lowerName, modeId] of modeMap) {
 					if (preExistingModeIds.has(modeId)) continue; // mode existed before — don't touch
-					const providedByImport = Object.keys(entry.modes).some(m => m.toLowerCase() === lowerName);
-					if (!providedByImport) {
+					if (!providedModeNames.has(lowerName)) {
 						try {
 							variable.setValueForMode(modeId, defaultValue(entry.resolvedType));
 						} catch (_) {

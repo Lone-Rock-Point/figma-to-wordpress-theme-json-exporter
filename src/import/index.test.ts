@@ -673,13 +673,11 @@ describe('writeImportEntries', () => {
 		expect(result).toMatchObject({ created: 1, updated: 0, skipped: 0, warnings: [] });
 	});
 
-	it('warns when a VarAliasRef target cannot be found in local or library collections', async () => {
+	it('skips (does not create) a variable when its VarAliasRef target cannot be found', async () => {
 		const colorCollection = makeCollection({ variableIds: [] });
-		const newVar = makeVariable({ name: 'palette/orange' });
 
-		// No USWDS collection anywhere
+		// No USWDS collection anywhere — library returns empty
 		mockFigma.variables.getLocalVariableCollectionsAsync.mockResolvedValue([colorCollection]);
-		mockFigma.variables.createVariable.mockReturnValue(newVar);
 		mockFigma.teamLibrary.getAvailableLibraryVariableCollectionsAsync.mockResolvedValue([]);
 
 		const aliasEntry: ImportEntry = {
@@ -691,7 +689,10 @@ describe('writeImportEntries', () => {
 
 		const result = await writeImportEntries([aliasEntry]);
 
-		expect(newVar.setValueForMode).not.toHaveBeenCalled();
-		expect(result.warnings.some(w => w.includes('Could not resolve'))).toBe(true);
+		// Variable must NOT be created — no orphaned variable with an unresolved alias
+		expect(mockFigma.variables.createVariable).not.toHaveBeenCalled();
+		expect(result).toMatchObject({ created: 0, updated: 0, skipped: 1 });
+		expect(result.warnings.some(w => w.includes('Skipping') && w.includes('could not resolve'))).toBe(true);
+		expect(result.warnings.some(w => w.includes('Enable the library'))).toBe(true);
 	});
 });
