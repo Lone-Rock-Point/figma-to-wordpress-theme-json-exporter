@@ -2,12 +2,14 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { mockFigma } from '../test-setup';
 import {
 	parseColor,
+	parseColorOrAlias,
 	parsePx,
 	parseFluidSpacing,
 	parseCustomValue,
 	parseThemeJson,
 	writeImportEntries,
 	type ImportEntry,
+	type VarAliasRef,
 } from './index';
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -51,6 +53,38 @@ describe('parseColor', () => {
 		expect(parseColor('')).toBeNull();
 		expect(parseColor('red')).toBeNull();
 		expect(parseColor('not-a-color')).toBeNull();
+	});
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// parseColorOrAlias
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('parseColorOrAlias', () => {
+	it('returns a FigmaColor for concrete hex, rgb, and transparent values', () => {
+		expect(parseColorOrAlias('#ff0000')).toEqual({ r: 1, g: 0, b: 0, a: 1 });
+		expect(parseColorOrAlias('rgb(0, 255, 0)')).toEqual({ r: 0, g: 1, b: 0, a: 1 });
+		expect(parseColorOrAlias('transparent')).toEqual({ r: 0, g: 0, b: 0, a: 0 });
+	});
+
+	it('returns a VarAliasRef for USWDS token var references', () => {
+		expect(parseColorOrAlias('var(--token--color--orange-50v)')).toEqual<VarAliasRef>({
+			type: 'VAR_ALIAS',
+			cssVar: 'var(--token--color--orange-50v)',
+		});
+	});
+
+	it('returns a VarAliasRef for any CSS var reference', () => {
+		expect(parseColorOrAlias('var(--wp--preset--color--primary)')).toEqual<VarAliasRef>({
+			type: 'VAR_ALIAS',
+			cssVar: 'var(--wp--preset--color--primary)',
+		});
+	});
+
+	it('returns null for unparseable values', () => {
+		expect(parseColorOrAlias('red')).toBeNull();
+		expect(parseColorOrAlias('')).toBeNull();
+		expect(parseColorOrAlias(undefined)).toBeNull();
 	});
 });
 
@@ -181,12 +215,18 @@ describe('parseThemeJson', () => {
 		expect(warnings.some(w => w.includes('Could not parse color'))).toBe(true);
 	});
 
-	it('warns and skips CSS var color references', () => {
+	it('treats CSS var color references as VarAliasRef entries (not warnings)', () => {
 		const { entries, warnings } = parseThemeJson({
-			settings: { color: { palette: [{ slug: 'x', color: 'var(--wp--preset--color--primary)' }] } },
+			settings: { color: { palette: [{ slug: 'primary', color: 'var(--token--color--blue-50)' }] } },
 		});
-		expect(entries).toHaveLength(0);
-		expect(warnings.some(w => w.includes('CSS variable references'))).toBe(true);
+		expect(warnings).toHaveLength(0);
+		expect(entries).toHaveLength(1);
+		expect(entries[0]).toMatchObject({
+			collection: 'settings [color]',
+			variableName: 'palette/primary',
+			resolvedType: 'COLOR',
+			modes: { Default: { type: 'VAR_ALIAS', cssVar: 'var(--token--color--blue-50)' } },
+		});
 	});
 
 	// --- settings [fluid]: font sizes ---
@@ -563,5 +603,61 @@ describe('writeImportEntries', () => {
 
 		expect(result.skipped).toBe(1);
 		expect(result.warnings.some(w => w.includes('Could not create'))).toBe(true);
+	});
+
+	// --- VarAliasRef resolution ---
+
+	it('resolves a VarAliasRef to a VARIABLE_ALIAS when the target collection exists locally', async () => {
+		const colorCollection = makeCollection({ id: 'col-color', variableIds: [] });
+		// USWDS source collection with a single variable
+		const uswdsCollection = {
+			id: 'col-uswds',
+			name: '!-usa',
+			variableIds: ['uswds-v1'],
+			modes: [{ modeId: 'mu1', name: 'Default' }],
+			renameMode: vi.fn(),
+			addMode: vi.fn(),
+		};
+		const uswdsVar = { id: 'uswds-v1', name: 'color/orange-50v', resolvedType: 'COLOR', setValueForMode: vi.fn() };
+		const newVar = makeVariable({ name: 'palette/orange' });
+
+		mockFigma.variables.getLocalVariableCollectionsAsync.mockResolvedValue([colorCollection, uswdsCollection]);
+		mockFigma.variables.getVariableByIdAsync.mockImplementation(async (id: string) =>
+			id === 'uswds-v1' ? uswdsVar : null
+		);
+		mockFigma.variables.createVariable.mockReturnValue(newVar);
+
+		const aliasEntry: ImportEntry = {
+			collection: 'settings [color]',
+			variableName: 'palette/orange',
+			resolvedType: 'COLOR',
+			modes: { Default: { type: 'VAR_ALIAS', cssVar: 'var(--token--color--orange-50v)' } as VarAliasRef },
+		};
+
+		const result = await writeImportEntries([aliasEntry]);
+
+		expect(newVar.setValueForMode).toHaveBeenCalledWith('m1', { type: 'VARIABLE_ALIAS', id: 'uswds-v1' });
+		expect(result).toMatchObject({ created: 1, updated: 0, skipped: 0, warnings: [] });
+	});
+
+	it('warns when a VarAliasRef target cannot be found in any local collection', async () => {
+		const colorCollection = makeCollection({ variableIds: [] });
+		const newVar = makeVariable({ name: 'palette/orange' });
+
+		// No USWDS collection present — resolveVarRef should return null
+		mockFigma.variables.getLocalVariableCollectionsAsync.mockResolvedValue([colorCollection]);
+		mockFigma.variables.createVariable.mockReturnValue(newVar);
+
+		const aliasEntry: ImportEntry = {
+			collection: 'settings [color]',
+			variableName: 'palette/orange',
+			resolvedType: 'COLOR',
+			modes: { Default: { type: 'VAR_ALIAS', cssVar: 'var(--token--color--orange-50v)' } as VarAliasRef },
+		};
+
+		const result = await writeImportEntries([aliasEntry]);
+
+		expect(newVar.setValueForMode).not.toHaveBeenCalled();
+		expect(result.warnings.some(w => w.includes('Could not resolve'))).toBe(true);
 	});
 });

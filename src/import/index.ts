@@ -1,13 +1,24 @@
+import { transformTokenReference } from '../utils/tokens';
+
 // --- Types ---
 
 export type FigmaColor = { r: number; g: number; b: number; a: number };
+
+/** A reference to another Figma variable, identified by its original CSS var string. */
+export type VarAliasRef = {
+	type: 'VAR_ALIAS';
+	/** Original CSS var string, e.g. 'var(--token--color--orange-50v)' */
+	cssVar: string;
+};
+
+export type ImportModeValue = FigmaColor | number | string | VarAliasRef;
 
 export type ImportEntry = {
 	collection: string;
 	variableName: string;
 	resolvedType: 'COLOR' | 'FLOAT' | 'STRING';
-	/** modeName → value (FigmaColor for COLOR, number for FLOAT, string for STRING) */
-	modes: Record<string, FigmaColor | number | string>;
+	/** modeName → value */
+	modes: Record<string, ImportModeValue>;
 };
 
 export type ParseResult = {
@@ -53,6 +64,22 @@ export function parseColor(value: string): FigmaColor | null {
 	}
 
 	return null;
+}
+
+/**
+ * Parse a color string or CSS var reference.
+ * - Concrete colors (hex, rgb, rgba, transparent) → FigmaColor
+ * - CSS var references (var(--token--...), var(--wp--...)) → VarAliasRef
+ * - Unparseable values → null
+ */
+export function parseColorOrAlias(value: string | undefined): FigmaColor | VarAliasRef | null {
+	if (!value || typeof value !== 'string') return null;
+	if (value.startsWith('var(')) return { type: 'VAR_ALIAS', cssVar: value };
+	return parseColor(value);
+}
+
+function isVarAliasRef(v: unknown): v is VarAliasRef {
+	return v !== null && typeof v === 'object' && (v as any).type === 'VAR_ALIAS';
 }
 
 /**
@@ -143,18 +170,17 @@ export function parseThemeJson(theme: any): ParseResult {
 				warnings.push(`settings [color]: Skipping palette entry — missing or invalid slug.`);
 				continue;
 			}
-			const color = parseColor(item.color);
-			if (color) {
+			const colorOrAlias = parseColorOrAlias(item.color);
+			if (colorOrAlias) {
 				entries.push({
 					collection: 'settings [color]',
 					variableName: `palette/${item.slug}`,
 					resolvedType: 'COLOR',
-					modes: { Default: color },
+					modes: { Default: colorOrAlias },
 				});
 			} else {
 				warnings.push(
-					`settings [color]: Could not parse color "${item.color}" for slug "${item.slug}" — skipped.` +
-					(item.color?.startsWith('var(') ? ' (CSS variable references cannot be imported as colors.)' : '')
+					`settings [color]: Could not parse color "${item.color}" for slug "${item.slug}" — skipped.`
 				);
 			}
 		}
@@ -293,6 +319,48 @@ function defaultValue(resolvedType: ImportEntry['resolvedType']): FigmaColor | n
 	return '';
 }
 
+/**
+ * Build a lookup map (cssVar string → variable ID) for all variables in a collection,
+ * using transformTokenReference to compute the CSS var each variable maps to.
+ */
+async function buildCollectionVarLookup(collection: any): Promise<Map<string, string>> {
+	const lookup = new Map<string, string>();
+	const vars = await Promise.all(
+		collection.variableIds.map((id: string) => figma.variables.getVariableByIdAsync(id))
+	);
+	for (const v of vars) {
+		if (!v) continue;
+		lookup.set(transformTokenReference(collection.name, v.name), v.id);
+	}
+	return lookup;
+}
+
+/**
+ * Find the Figma variable ID that corresponds to the given CSS var string.
+ * Searches local collections, prioritising those likely to contain the var
+ * (e.g. '!-usa' for var(--token--...) references).
+ * Results are cached in `cache` to avoid redundant API calls.
+ */
+async function resolveVarRef(
+	cssVar: string,
+	allCollections: any[],
+	cache: Map<string, Map<string, string>>,
+): Promise<string | null> {
+	// Narrow the search: USWDS tokens always live in '!-usa' collections
+	const prioritized = cssVar.startsWith('var(--token--')
+		? allCollections.filter(c => c.name.toLowerCase().trim().startsWith('!-usa'))
+		: allCollections;
+
+	for (const col of prioritized) {
+		if (!cache.has(col.id)) {
+			cache.set(col.id, await buildCollectionVarLookup(col));
+		}
+		const id = cache.get(col.id)!.get(cssVar);
+		if (id) return id;
+	}
+	return null;
+}
+
 export async function writeImportEntries(entries: ImportEntry[]): Promise<WriteResult> {
 	const existingCollections = await figma.variables.getLocalVariableCollectionsAsync();
 	const collectionByName = new Map<string, any>();
@@ -305,6 +373,10 @@ export async function writeImportEntries(entries: ImportEntry[]): Promise<WriteR
 	let updated = 0;
 	let skipped = 0;
 	const warnings: string[] = [];
+
+	// Lazy lookup cache for VarAliasRef resolution: collection ID → (cssVar → variableId)
+	// Shared across all collections so the same source collection is only fetched once.
+	const varLookupCache = new Map<string, Map<string, string>>();
 
 	// Group entries by collection
 	const byCollection = new Map<string, ImportEntry[]>();
@@ -402,8 +474,24 @@ export async function writeImportEntries(entries: ImportEntry[]): Promise<WriteR
 					warnings.push(`Mode "${modeName}" not found in collection "${collectionName}" for variable "${entry.variableName}".`);
 					continue;
 				}
+
+				// Resolve VarAliasRef → Figma VariableAlias before setting
+				let setVal: any = value;
+				if (isVarAliasRef(value)) {
+					const targetId = await resolveVarRef(value.cssVar, existingCollections, varLookupCache);
+					if (targetId) {
+						setVal = { type: 'VARIABLE_ALIAS', id: targetId };
+					} else {
+						warnings.push(
+							`Could not resolve "${value.cssVar}" to a local Figma variable for "${entry.variableName}" [${modeName}]. ` +
+							`Ensure the target collection (e.g. "!-usa") exists in this file.`
+						);
+						continue;
+					}
+				}
+
 				try {
-					variable.setValueForMode(modeId, value);
+					variable.setValueForMode(modeId, setVal);
 					anySet = true;
 				} catch (err) {
 					warnings.push(`Could not set "${entry.variableName}" [${modeName}]: ${err instanceof Error ? err.message : String(err)}`);

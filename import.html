@@ -240,6 +240,13 @@
 		flex-shrink: 0;
 	}
 
+	.alias-arrow {
+		display: inline-block;
+		margin-right: 4px;
+		opacity: 0.5;
+		font-size: 10px;
+	}
+
 	.entry-modes {
 		display: flex;
 		flex-direction: column;
@@ -499,12 +506,10 @@
 	// ── Preview renderer ─────────────────────────────────────────────────────
 
 	function figmaColorToCss(c) {
-		const r = Math.round(c.r * 255);
-		const g = Math.round(c.g * 255);
-		const b = Math.round(c.b * 255);
 		if (c.a === 0) return 'transparent';
-		if (c.a >= 1)  return `rgb(${r},${g},${b})`;
-		return `rgba(${r},${g},${b},${c.a.toFixed(2)})`;
+		const h = n => Math.round(n * 255).toString(16).padStart(2, '0');
+		const hex = h(c.r) + h(c.g) + h(c.b);
+		return c.a >= 1 ? `#${hex}` : `#${hex}${h(c.a)}`;
 	}
 
 	function escapeHtml(str) {
@@ -517,6 +522,10 @@
 	}
 
 	function formatModeValue(entry, modeName, value) {
+		// CSS var alias reference (e.g. var(--token--color--orange-50v))
+		if (value && typeof value === 'object' && value.type === 'VAR_ALIAS') {
+			return `<span class="alias-arrow">→</span>${escapeHtml(value.cssVar)}`;
+		}
 		if (entry.resolvedType === 'COLOR') {
 			const css    = figmaColorToCss(value);
 			// css is constructed from numbers/keywords — safe to interpolate directly
