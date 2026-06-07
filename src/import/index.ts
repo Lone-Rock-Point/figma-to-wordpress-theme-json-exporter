@@ -1,13 +1,24 @@
+import { transformTokenReference, resolveAliasToString } from '../utils/tokens';
+
 // --- Types ---
 
 export type FigmaColor = { r: number; g: number; b: number; a: number };
+
+/** A reference to another Figma variable, identified by its original CSS var string. */
+export type VarAliasRef = {
+	type: 'VAR_ALIAS';
+	/** Original CSS var string, e.g. 'var(--token--color--orange-50v)' */
+	cssVar: string;
+};
+
+export type ImportModeValue = FigmaColor | number | string | VarAliasRef;
 
 export type ImportEntry = {
 	collection: string;
 	variableName: string;
 	resolvedType: 'COLOR' | 'FLOAT' | 'STRING';
-	/** modeName → value (FigmaColor for COLOR, number for FLOAT, string for STRING) */
-	modes: Record<string, FigmaColor | number | string>;
+	/** modeName → value */
+	modes: Record<string, ImportModeValue>;
 };
 
 export type ParseResult = {
@@ -44,15 +55,38 @@ export function parseColor(value: string): FigmaColor | null {
 	// rgba(r, g, b, a) or rgb(r, g, b)
 	const rgba = value.match(/^rgba?\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)\s*(?:,\s*([\d.]+))?\s*\)$/);
 	if (rgba) {
+		const clamp01 = (n: number) => Math.min(1, Math.max(0, n));
 		return {
-			r: parseInt(rgba[1]) / 255,
-			g: parseInt(rgba[2]) / 255,
-			b: parseInt(rgba[3]) / 255,
-			a: rgba[4] !== undefined ? parseFloat(rgba[4]) : 1,
+			r: clamp01(parseInt(rgba[1]) / 255),
+			g: clamp01(parseInt(rgba[2]) / 255),
+			b: clamp01(parseInt(rgba[3]) / 255),
+			a: clamp01(rgba[4] !== undefined ? parseFloat(rgba[4]) : 1),
 		};
 	}
 
 	return null;
+}
+
+/**
+ * Parse a color string or CSS var reference.
+ * - Concrete colors (hex, rgb, rgba, transparent) → FigmaColor
+ * - CSS var references (var(--token--...), var(--wp--...)) → VarAliasRef
+ * - Unparseable values → null
+ */
+export function parseColorOrAlias(value: string | undefined): FigmaColor | VarAliasRef | null {
+	if (!value || typeof value !== 'string') return null;
+	const trimmed = value.trim();
+	if (trimmed.startsWith('var(')) return { type: 'VAR_ALIAS', cssVar: trimmed };
+	return parseColor(trimmed);
+}
+
+function isVarAliasRef(v: unknown): v is VarAliasRef {
+	return (
+		v !== null &&
+		typeof v === 'object' &&
+		(v as any).type === 'VAR_ALIAS' &&
+		typeof (v as any).cssVar === 'string'
+	);
 }
 
 /**
@@ -143,18 +177,17 @@ export function parseThemeJson(theme: any): ParseResult {
 				warnings.push(`settings [color]: Skipping palette entry — missing or invalid slug.`);
 				continue;
 			}
-			const color = parseColor(item.color);
-			if (color) {
+			const colorOrAlias = parseColorOrAlias(item.color);
+			if (colorOrAlias) {
 				entries.push({
 					collection: 'settings [color]',
 					variableName: `palette/${item.slug}`,
 					resolvedType: 'COLOR',
-					modes: { Default: color },
+					modes: { Default: colorOrAlias },
 				});
 			} else {
 				warnings.push(
-					`settings [color]: Could not parse color "${item.color}" for slug "${item.slug}" — skipped.` +
-					(item.color?.startsWith('var(') ? ' (CSS variable references cannot be imported as colors.)' : '')
+					`settings [color]: Could not parse color "${item.color}" for slug "${item.slug}" — skipped.`
 				);
 			}
 		}
@@ -282,6 +315,179 @@ export function parseThemeJson(theme: any): ParseResult {
 	return { entries, warnings };
 }
 
+// --- Diff types ---
+
+/** Per-mode comparison between what's in Figma now and what the import would set. */
+export type ModeDiff = {
+	incoming: string;   // display string for the incoming value
+	current?: string;   // display string for the current Figma value (absent if new)
+	changed: boolean;   // true when incoming !== current
+};
+
+export type DiffStatus = 'new' | 'changed' | 'unchanged' | 'type-mismatch';
+
+export type DiffEntry = {
+	collection: string;
+	variableName: string;
+	resolvedType: 'COLOR' | 'FLOAT' | 'STRING';
+	status: DiffStatus;
+	modes: Record<string, ModeDiff>;
+};
+
+export type DiffResult = {
+	diffs: DiffEntry[];
+	warnings: string[];
+};
+
+// --- Diff helpers ---
+
+/** Convert an incoming ImportModeValue to a display string. */
+function importValueToDisplay(value: ImportModeValue, resolvedType: string, modeName: string): string {
+	if (isVarAliasRef(value)) return value.cssVar;
+	if (resolvedType === 'COLOR' && value !== null && typeof value === 'object' && 'r' in value) {
+		const c = value as FigmaColor;
+		if (c.a === 0) return 'transparent';
+		const h = (n: number) => Math.round(n * 255).toString(16).padStart(2, '0');
+		return c.a >= 1 ? `#${h(c.r)}${h(c.g)}${h(c.b)}` : `#${h(c.r)}${h(c.g)}${h(c.b)}${h(c.a)}`;
+	}
+	if (resolvedType === 'FLOAT' && typeof value === 'number') {
+		return modeName.toLowerCase() === 'vw' ? `${value}vw` : `${value}px`;
+	}
+	return String(value);
+}
+
+/** Convert a raw Figma variable value (from valuesByMode) to a display string. */
+async function currentValueToDisplay(
+	rawValue: any,
+	resolvedType: string,
+	modeName: string,
+	collectionsMap: Map<string, string>,
+): Promise<string> {
+	if (rawValue !== null && typeof rawValue === 'object' && rawValue.type === 'VARIABLE_ALIAS') {
+		const cssVar = await resolveAliasToString(rawValue.id, collectionsMap);
+		return cssVar ?? `alias:${rawValue.id}`;
+	}
+	if (resolvedType === 'COLOR' && rawValue !== null && typeof rawValue === 'object' && 'r' in rawValue) {
+		if (rawValue.a === 0) return 'transparent';
+		const h = (n: number) => Math.round(n * 255).toString(16).padStart(2, '0');
+		return rawValue.a >= 1
+			? `#${h(rawValue.r)}${h(rawValue.g)}${h(rawValue.b)}`
+			: `#${h(rawValue.r)}${h(rawValue.g)}${h(rawValue.b)}${h(rawValue.a)}`;
+	}
+	if (resolvedType === 'FLOAT' && typeof rawValue === 'number') {
+		return modeName.toLowerCase() === 'vw' ? `${rawValue}vw` : `${rawValue}px`;
+	}
+	return String(rawValue ?? '');
+}
+
+/**
+ * Read-only pass: compare each ImportEntry against the current Figma state.
+ * Returns DiffEntry[] describing what would change if the import were run.
+ */
+export async function diffImportEntries(entries: ImportEntry[]): Promise<DiffResult> {
+	const warnings: string[] = [];
+	const diffs: DiffEntry[] = [];
+
+	const existingCollections = await figma.variables.getLocalVariableCollectionsAsync();
+
+	// Build lookup maps
+	const collectionByName = new Map<string, any>();
+	const collectionsMap = new Map<string, string>(); // ID → name, for alias resolution
+	for (const col of existingCollections) {
+		collectionByName.set(col.name.toLowerCase().trim(), col);
+		collectionsMap.set(col.id, col.name);
+	}
+
+	// Fetch all variables per collection up front
+	const varsByCollection = new Map<string, Map<string, any>>();
+	for (const col of existingCollections) {
+		const vars = await Promise.all(
+			col.variableIds.map((id: string) => figma.variables.getVariableByIdAsync(id))
+		);
+		const varMap = new Map<string, any>();
+		for (const v of vars) {
+			if (v) varMap.set(v.name, v);
+		}
+		varsByCollection.set(col.name.toLowerCase().trim(), varMap);
+	}
+
+	for (const entry of entries) {
+		const existingCollection = collectionByName.get(entry.collection.toLowerCase().trim());
+		const existingVar = existingCollection
+			? varsByCollection.get(entry.collection.toLowerCase().trim())?.get(entry.variableName)
+			: undefined;
+
+		// Mode ID map for this collection
+		const modeMap = new Map<string, string>();
+		if (existingCollection) {
+			for (const m of existingCollection.modes) {
+				modeMap.set(m.name.toLowerCase(), m.modeId);
+			}
+		}
+
+		if (!existingVar) {
+			// Brand new variable
+			const modes: Record<string, ModeDiff> = {};
+			for (const [modeName, value] of Object.entries(entry.modes)) {
+				modes[modeName] = {
+					incoming: importValueToDisplay(value, entry.resolvedType, modeName),
+					changed: true,
+				};
+			}
+			diffs.push({ collection: entry.collection, variableName: entry.variableName, resolvedType: entry.resolvedType, status: 'new', modes });
+			continue;
+		}
+
+		if (existingVar.resolvedType !== entry.resolvedType) {
+			const modes: Record<string, ModeDiff> = {};
+			for (const [modeName, value] of Object.entries(entry.modes)) {
+				modes[modeName] = {
+					incoming: importValueToDisplay(value, entry.resolvedType, modeName),
+					changed: false,
+				};
+			}
+			diffs.push({ collection: entry.collection, variableName: entry.variableName, resolvedType: entry.resolvedType, status: 'type-mismatch', modes });
+			continue;
+		}
+
+		// Compare mode by mode
+		const modes: Record<string, ModeDiff> = {};
+		let anyChanged = false;
+
+		for (const [modeName, value] of Object.entries(entry.modes)) {
+			const incoming = importValueToDisplay(value, entry.resolvedType, modeName);
+			const modeId = modeMap.get(modeName.toLowerCase());
+
+			if (!modeId) {
+				// Mode doesn't exist yet — counts as new
+				modes[modeName] = { incoming, changed: true };
+				anyChanged = true;
+				continue;
+			}
+
+			const rawCurrent = existingVar.valuesByMode?.[modeId];
+			let current: string | undefined;
+			if (rawCurrent !== undefined) {
+				current = await currentValueToDisplay(rawCurrent, entry.resolvedType, modeName, collectionsMap);
+			}
+
+			const changed = current !== incoming;
+			if (changed) anyChanged = true;
+			modes[modeName] = { incoming, current, changed };
+		}
+
+		diffs.push({
+			collection: entry.collection,
+			variableName: entry.variableName,
+			resolvedType: entry.resolvedType,
+			status: anyChanged ? 'changed' : 'unchanged',
+			modes,
+		});
+	}
+
+	return { diffs, warnings };
+}
+
 // --- Figma writer ---
 
 const DEFAULT_MODE_NAME = 'Default';
@@ -291,6 +497,82 @@ function defaultValue(resolvedType: ImportEntry['resolvedType']): FigmaColor | n
 	if (resolvedType === 'COLOR') return { r: 0, g: 0, b: 0, a: 1 };
 	if (resolvedType === 'FLOAT') return 0;
 	return '';
+}
+
+/**
+ * Build a lookup map (cssVar string → variable ID) for all variables in a collection,
+ * using transformTokenReference to compute the CSS var each variable maps to.
+ */
+async function buildCollectionVarLookup(collection: any): Promise<Map<string, string>> {
+	const lookup = new Map<string, string>();
+	const vars = await Promise.all(
+		collection.variableIds.map((id: string) => figma.variables.getVariableByIdAsync(id))
+	);
+	for (const v of vars) {
+		if (!v) continue;
+		lookup.set(transformTokenReference(collection.name, v.name), v.id);
+	}
+	return lookup;
+}
+
+/**
+ * Find the Figma variable ID that corresponds to the given CSS var string.
+ *
+ * Search order:
+ *   1. Local collections (fast, no extra API calls beyond variable fetch)
+ *   2. Team library collections (requires "teamlibrary" permission; library
+ *      variables are imported via importVariableByKeyAsync so they can be
+ *      referenced as aliases even though they live outside the local file).
+ *
+ * Results are cached in `cache` to avoid redundant API calls across entries.
+ */
+async function resolveVarRef(
+	cssVar: string,
+	localCollections: any[],
+	cache: Map<string, Map<string, string>>,
+): Promise<string | null> {
+	// We do NOT filter by collection name — the variable group prefix (e.g. "!-usa/")
+	// may differ from the collection name (e.g. "Color"). transformTokenReference
+	// handles variable-name prefixes internally, so we let the cached lookup do the
+	// matching across every collection.
+
+	// 1. Local collections
+	for (const col of localCollections) {
+		if (!cache.has(col.id)) {
+			cache.set(col.id, await buildCollectionVarLookup(col));
+		}
+		const id = cache.get(col.id)!.get(cssVar);
+		if (id) return id;
+	}
+
+	// 2. Team library collections (permission: "teamlibrary")
+	let libCollections: any[];
+	try {
+		libCollections = await figma.teamLibrary.getAvailableLibraryVariableCollectionsAsync();
+	} catch {
+		// API unavailable (older client) or permission not granted
+		return null;
+	}
+
+	for (const libCol of libCollections) {
+		const cacheKey = `lib:${libCol.key}`;
+		if (!cache.has(cacheKey)) {
+			const libVars = await figma.teamLibrary.getVariablesInLibraryCollectionAsync(libCol.key);
+			const lookup = new Map<string, string>();
+			for (const v of libVars) {
+				lookup.set(transformTokenReference(libCol.name, v.name), v.key);
+			}
+			cache.set(cacheKey, lookup);
+		}
+		const varKey = cache.get(cacheKey)!.get(cssVar);
+		if (varKey) {
+			// Import the library variable into the local file to obtain a stable ID
+			const imported = await figma.variables.importVariableByKeyAsync(varKey);
+			return imported?.id ?? null;
+		}
+	}
+
+	return null;
 }
 
 export async function writeImportEntries(entries: ImportEntry[]): Promise<WriteResult> {
@@ -305,6 +587,10 @@ export async function writeImportEntries(entries: ImportEntry[]): Promise<WriteR
 	let updated = 0;
 	let skipped = 0;
 	const warnings: string[] = [];
+
+	// Lazy lookup cache for VarAliasRef resolution: collection ID → (cssVar → variableId)
+	// Shared across all collections so the same source collection is only fetched once.
+	const varLookupCache = new Map<string, Map<string, string>>();
 
 	// Group entries by collection
 	const byCollection = new Map<string, ImportEntry[]>();
@@ -377,6 +663,32 @@ export async function writeImportEntries(entries: ImportEntry[]): Promise<WriteR
 
 		// --- Create or update each variable ---
 		for (const entry of collectionEntries) {
+			// Pre-resolve all VarAliasRef values BEFORE touching Figma so we never
+			// create a variable we can't fully populate. If any alias target is missing
+			// (library not enabled, collection not present), skip the entire entry.
+			const resolvedModes: Record<string, any> = {};
+			let hasUnresolvableAlias = false;
+			for (const [modeName, value] of Object.entries(entry.modes)) {
+				if (isVarAliasRef(value)) {
+					const targetId = await resolveVarRef(value.cssVar, existingCollections, varLookupCache);
+					if (!targetId) {
+						warnings.push(
+							`Skipping "${entry.variableName}" — could not resolve "${value.cssVar}". ` +
+							`Enable the library that contains this variable in your Figma file, then re-import.`
+						);
+						hasUnresolvableAlias = true;
+						break;
+					}
+					resolvedModes[modeName] = { type: 'VARIABLE_ALIAS', id: targetId };
+				} else {
+					resolvedModes[modeName] = value;
+				}
+			}
+			if (hasUnresolvableAlias) {
+				skipped++;
+				continue;
+			}
+
 			let variable = existingVars.get(entry.variableName);
 			const isNew = !variable;
 
@@ -396,14 +708,14 @@ export async function writeImportEntries(entries: ImportEntry[]): Promise<WriteR
 
 			// Set value for each mode explicitly provided by the import
 			let anySet = false;
-			for (const [modeName, value] of Object.entries(entry.modes)) {
+			for (const [modeName, setVal] of Object.entries(resolvedModes)) {
 				const modeId = modeMap.get(modeName.toLowerCase());
 				if (!modeId) {
 					warnings.push(`Mode "${modeName}" not found in collection "${collectionName}" for variable "${entry.variableName}".`);
 					continue;
 				}
 				try {
-					variable.setValueForMode(modeId, value);
+					variable.setValueForMode(modeId, setVal);
 					anySet = true;
 				} catch (err) {
 					warnings.push(`Could not set "${entry.variableName}" [${modeName}]: ${err instanceof Error ? err.message : String(err)}`);
@@ -413,10 +725,10 @@ export async function writeImportEntries(entries: ImportEntry[]): Promise<WriteR
 			// For NEW variables only: fill newly-added modes with safe defaults so Figma's
 			// all-modes requirement is satisfied. Never fill defaults for existing variables
 			// to avoid overwriting values the user hasn't asked to change.
+			const providedModeNames = new Set(Object.keys(resolvedModes).map(m => m.toLowerCase()));
 			if (isNew) {
 				for (const [lowerName, modeId] of modeMap) {
-					const providedByImport = Object.keys(entry.modes).some(m => m.toLowerCase() === lowerName);
-					if (!providedByImport) {
+					if (!providedModeNames.has(lowerName)) {
 						try {
 							variable.setValueForMode(modeId, defaultValue(entry.resolvedType));
 						} catch (_) {
@@ -429,8 +741,7 @@ export async function writeImportEntries(entries: ImportEntry[]): Promise<WriteR
 				// during this import run (i.e. didn't exist before we started).
 				for (const [lowerName, modeId] of modeMap) {
 					if (preExistingModeIds.has(modeId)) continue; // mode existed before — don't touch
-					const providedByImport = Object.keys(entry.modes).some(m => m.toLowerCase() === lowerName);
-					if (!providedByImport) {
+					if (!providedModeNames.has(lowerName)) {
 						try {
 							variable.setValueForMode(modeId, defaultValue(entry.resolvedType));
 						} catch (_) {

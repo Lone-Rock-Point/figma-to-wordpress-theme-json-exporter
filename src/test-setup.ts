@@ -9,6 +9,11 @@ const mockFigma = {
 		getVariableCollectionByIdAsync: vi.fn(),
 		createVariableCollection: vi.fn(),
 		createVariable: vi.fn(),
+		importVariableByKeyAsync: vi.fn(),
+	},
+	teamLibrary: {
+		getAvailableLibraryVariableCollectionsAsync: vi.fn(),
+		getVariablesInLibraryCollectionAsync: vi.fn(),
 	},
 	getLocalTextStylesAsync: vi.fn(),
 	ui: {

@@ -3,7 +3,7 @@
   "id": "1476325215239454172",
   "api": "1.0.0",
   "editorType": ["figma"],
-  "permissions": [],
+  "permissions": ["teamlibrary"],
   "main": "dist/code.js",
   "networkAccess": { "allowedDomains": ["https://cdnjs.cloudflare.com"] },
   "menu": [

@@ -240,6 +240,13 @@
 		flex-shrink: 0;
 	}
 
+	.alias-arrow {
+		display: inline-block;
+		margin-right: 4px;
+		opacity: 0.5;
+		font-size: 10px;
+	}
+
 	.entry-modes {
 		display: flex;
 		flex-direction: column;
@@ -248,6 +255,37 @@
 
 	.mode-row { display: flex; gap: 4px; align-items: center; }
 	.mode-label { color: var(--figma-color-text-tertiary, var(--figma-color-text-secondary)); font-size: 0.72rem; min-width: 48px; }
+
+	/* Diff badges */
+	.diff-badge {
+		display: inline-block;
+		font-size: 9px;
+		font-weight: 700;
+		letter-spacing: 0.04em;
+		padding: 1px 5px;
+		border-radius: 3px;
+		text-transform: uppercase;
+		white-space: nowrap;
+	}
+	.diff-badge-new       { background: rgba(0,160,100,0.14); color: #00925c; }
+	.diff-badge-changed   { background: rgba(80,120,255,0.14); color: #4060d0; }
+	.diff-badge-unchanged { background: var(--figma-color-bg-tertiary,#eee); color: var(--figma-color-text-secondary,#666); }
+	.diff-badge-type-mismatch { background: rgba(210,50,50,0.14); color: #c03030; cursor: help; }
+
+	/* Dim unchanged / mismatch rows */
+	.diff-row-unchanged td, .diff-row-type-mismatch td { opacity: 0.5; }
+
+	/* Inline diff: old → new */
+	.diff-unchanged { opacity: 0.55; }
+	.diff-old   { text-decoration: line-through; opacity: 0.55; margin-right: 2px; }
+	.diff-arrow { margin: 0 3px; opacity: 0.45; font-size: 0.85em; }
+	.diff-new   { font-weight: 600; }
+
+	/* Summary counts */
+	.count-new     { color: #00925c; }
+	.count-changed { color: #4060d0; }
+	.count-unchanged { color: var(--figma-color-text-secondary, #888); }
+	.count-mismatch  { color: #c03030; }
 
 	/* Result state */
 	.result-panel {
@@ -425,13 +463,20 @@
 			btnPreview.textContent = 'Preview Import';
 
 			previewEntries = pluginMessage.entries || [];
+			const diffs = pluginMessage.diffs || [];
 			showWarnings(pluginMessage.warnings || []);
-			renderPreview(previewEntries);
+			renderDiff(diffs);
 
-			if (previewEntries.length > 0) {
+			const actionable = diffs.filter(d => d.status === 'new' || d.status === 'changed').length;
+			if (actionable > 0) {
+				const newCount    = diffs.filter(d => d.status === 'new').length;
+				const changedCount = diffs.filter(d => d.status === 'changed').length;
+				const parts = [];
+				if (newCount)     parts.push(`${newCount} new`);
+				if (changedCount) parts.push(`${changedCount} updated`);
 				btnImport.style.display = 'block';
 				btnImport.disabled = false;
-				btnImport.textContent = 'Import Variables';
+				btnImport.textContent = `Import Variables (${parts.join(', ')})`;
 			}
 		}
 
@@ -496,16 +541,7 @@
 		chevron.classList.toggle('open', !open);
 	});
 
-	// ── Preview renderer ─────────────────────────────────────────────────────
-
-	function figmaColorToCss(c) {
-		const r = Math.round(c.r * 255);
-		const g = Math.round(c.g * 255);
-		const b = Math.round(c.b * 255);
-		if (c.a === 0) return 'transparent';
-		if (c.a >= 1)  return `rgb(${r},${g},${b})`;
-		return `rgba(${r},${g},${b},${c.a.toFixed(2)})`;
-	}
+	// ── Preview / diff renderer ─────────────────────────────────────────────
 
 	function escapeHtml(str) {
 		return String(str)
@@ -516,96 +552,124 @@
 			.replace(/'/g, '&#39;');
 	}
 
-	function formatModeValue(entry, modeName, value) {
-		if (entry.resolvedType === 'COLOR') {
-			const css    = figmaColorToCss(value);
-			// css is constructed from numbers/keywords — safe to interpolate directly
-			const swatch = `<span class="color-swatch" style="background:${css};"></span>`;
-			return `${swatch}${escapeHtml(css)}`;
+	/**
+	 * Render a single display string (already converted to hex / px / cssVar by
+	 * the plugin's importValueToDisplay / currentValueToDisplay helpers).
+	 * Returns an HTML snippet — only safe values are interpolated directly.
+	 */
+	function renderDisplayString(str, resolvedType) {
+		if (!str) return '';
+		if (resolvedType === 'COLOR') {
+			if (str.startsWith('var(')) {
+				return `<span class="alias-arrow">→</span>${escapeHtml(str)}`;
+			}
+			// str is a hex colour or 'transparent' built from numbers — safe to use in style attr
+			return `<span class="color-swatch" style="background:${str};"></span>${escapeHtml(str)}`;
 		}
-		if (entry.resolvedType === 'FLOAT') {
-			// vw mode values represent viewport-width units, not pixels
-			const unit = modeName.toLowerCase() === 'vw' ? 'vw' : 'px';
-			return escapeHtml(`${value}${unit}`);
-		}
-		const str = String(value);
-		return escapeHtml(str.length > 40 ? str.slice(0, 39) + '…' : str);
+		const s = String(str);
+		return escapeHtml(s.length > 40 ? s.slice(0, 39) + '…' : s);
 	}
 
-	function renderPreview(entries) {
+	function formatModeDiff(diff, modeName, modeDiff) {
+		const { incoming, current, changed } = modeDiff;
+		const inHtml = renderDisplayString(incoming, diff.resolvedType);
+
+		if (!current) {
+			// New variable or new mode — just show incoming
+			return inHtml;
+		}
+		if (!changed) {
+			return `<span class="diff-unchanged">${inHtml}</span>`;
+		}
+		// Changed — show old → new
+		const curHtml = renderDisplayString(current, diff.resolvedType);
+		return `<span class="diff-old">${curHtml}</span><span class="diff-arrow">→</span><span class="diff-new">${inHtml}</span>`;
+	}
+
+	function renderDiff(diffs) {
 		const container = document.getElementById('preview-container');
 		container.innerHTML = '';
 
-		if (!entries || entries.length === 0) {
+		if (!diffs || diffs.length === 0) {
 			container.innerHTML = '<div class="empty-state">No importable entries found.</div>';
 			return;
 		}
 
-		// Group by collection
-		const grouped = new Map();
-		for (const entry of entries) {
-			if (!grouped.has(entry.collection)) grouped.set(entry.collection, []);
-			grouped.get(entry.collection).push(entry);
-		}
+		// Count by status
+		const counts = { new: 0, changed: 0, unchanged: 0, 'type-mismatch': 0 };
+		for (const d of diffs) counts[d.status] = (counts[d.status] || 0) + 1;
 
-		// Summary
-		const total = entries.length;
-		const colCount = grouped.size;
+		// Summary line
 		const summary = document.createElement('div');
 		summary.className = 'preview-summary';
-		summary.innerHTML = `<strong>${total}</strong> variable${total !== 1 ? 's' : ''} across <strong>${colCount}</strong> collection${colCount !== 1 ? 's' : ''} will be imported.`;
+		const parts = [];
+		if (counts.new)              parts.push(`<span class="count-new">${counts.new} new</span>`);
+		if (counts.changed)          parts.push(`<span class="count-changed">${counts.changed} updated</span>`);
+		if (counts.unchanged)        parts.push(`<span class="count-unchanged">${counts.unchanged} unchanged</span>`);
+		if (counts['type-mismatch']) parts.push(`<span class="count-mismatch">${counts['type-mismatch']} can\'t update</span>`);
+		summary.innerHTML = `<strong>${diffs.length}</strong> variable${diffs.length !== 1 ? 's' : ''}: ${parts.join(' · ')}`;
 		container.appendChild(summary);
 
-		// Collection groups
-		for (const [collectionName, collectionEntries] of grouped) {
+		// Group by collection
+		const grouped = new Map();
+		for (const diff of diffs) {
+			if (!grouped.has(diff.collection)) grouped.set(diff.collection, []);
+			grouped.get(diff.collection).push(diff);
+		}
+
+		const BADGE_LABEL = { new: 'NEW', changed: 'UPDATED', unchanged: '=', 'type-mismatch': '⚠' };
+		const BADGE_TITLE = { 'type-mismatch': 'Existing variable type does not match — will be skipped' };
+
+		for (const [collectionName, collectionDiffs] of grouped) {
 			const group = document.createElement('div');
 			group.className = 'collection-group';
 
 			const header = document.createElement('div');
 			header.className = 'collection-header';
-			header.innerHTML = `<span>${collectionName}</span><span class="collection-count">${collectionEntries.length} variable${collectionEntries.length !== 1 ? 's' : ''}</span>`;
+			header.innerHTML = `<span>${escapeHtml(collectionName)}</span><span class="collection-count">${collectionDiffs.length} variable${collectionDiffs.length !== 1 ? 's' : ''}</span>`;
 			group.appendChild(header);
 
 			const table = document.createElement('table');
 			table.className = 'entry-table';
 
-			for (const entry of collectionEntries) {
+			for (const diff of collectionDiffs) {
 				const tr = document.createElement('tr');
+				tr.className = `diff-row diff-row-${diff.status}`;
 
 				// Variable name
 				const tdName = document.createElement('td');
 				tdName.className = 'entry-name';
-				tdName.textContent = entry.variableName;
+				tdName.textContent = diff.variableName;
 
-				// Type badge
-				const tdType = document.createElement('td');
+				// Status badge (replaces old type badge)
+				const tdStatus = document.createElement('td');
 				const badge = document.createElement('span');
-				badge.className = `entry-type type-${entry.resolvedType.toLowerCase()}`;
-				badge.textContent = entry.resolvedType;
-				tdType.appendChild(badge);
+				badge.className = `diff-badge diff-badge-${diff.status}`;
+				badge.textContent = BADGE_LABEL[diff.status] || diff.status;
+				if (BADGE_TITLE[diff.status]) badge.title = BADGE_TITLE[diff.status];
+				tdStatus.appendChild(badge);
 
-				// Value(s)
+				// Value(s) — diff view
 				const tdValue = document.createElement('td');
 				tdValue.className = 'entry-value';
-				const modeNames = Object.keys(entry.modes);
+				const modeNames = Object.keys(diff.modes);
 
 				if (modeNames.length === 1) {
-					const val = entry.modes[modeNames[0]];
-					tdValue.innerHTML = formatModeValue(entry, modeNames[0], val);
+					tdValue.innerHTML = formatModeDiff(diff, modeNames[0], diff.modes[modeNames[0]]);
 				} else {
 					const modesDiv = document.createElement('div');
 					modesDiv.className = 'entry-modes';
 					for (const modeName of modeNames) {
 						const row = document.createElement('div');
 						row.className = 'mode-row';
-						row.innerHTML = `<span class="mode-label">${modeName}:</span> ${formatModeValue(entry, modeName, entry.modes[modeName])}`;
+						row.innerHTML = `<span class="mode-label">${escapeHtml(modeName)}:</span> ${formatModeDiff(diff, modeName, diff.modes[modeName])}`;
 						modesDiv.appendChild(row);
 					}
 					tdValue.appendChild(modesDiv);
 				}
 
 				tr.appendChild(tdName);
-				tr.appendChild(tdType);
+				tr.appendChild(tdStatus);
 				tr.appendChild(tdValue);
 				table.appendChild(tr);
 			}
