@@ -2,7 +2,7 @@ console.clear();
 
 import { ExportOptions } from './types';
 import { exportToJSON } from './export/index';
-import { parseThemeJson, writeImportEntries } from './import/index';
+import { parseThemeJson, diffImportEntries, writeImportEntries } from './import/index';
 
 figma.ui.onmessage = async (e) => {
 	console.log("code received message", e);
@@ -20,12 +20,19 @@ figma.ui.onmessage = async (e) => {
 
 	} else if (e.type === "IMPORT_PREVIEW") {
 		try {
-			const result = parseThemeJson(e.themeJson);
-			figma.ui.postMessage({ type: "IMPORT_PREVIEW_RESULT", ...result });
+			const { entries, warnings: parseWarnings } = parseThemeJson(e.themeJson);
+			const { diffs, warnings: diffWarnings } = await diffImportEntries(entries);
+			figma.ui.postMessage({
+				type: "IMPORT_PREVIEW_RESULT",
+				entries,
+				diffs,
+				warnings: [...parseWarnings, ...diffWarnings],
+			});
 		} catch (error) {
 			figma.ui.postMessage({
 				type: "IMPORT_PREVIEW_RESULT",
 				entries: [],
+				diffs: [],
 				warnings: [error instanceof Error ? error.message : String(error)],
 			});
 		}

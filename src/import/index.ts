@@ -1,4 +1,4 @@
-import { transformTokenReference } from '../utils/tokens';
+import { transformTokenReference, resolveAliasToString } from '../utils/tokens';
 
 // --- Types ---
 
@@ -306,6 +306,179 @@ export function parseThemeJson(theme: any): ParseResult {
 	}
 
 	return { entries, warnings };
+}
+
+// --- Diff types ---
+
+/** Per-mode comparison between what's in Figma now and what the import would set. */
+export type ModeDiff = {
+	incoming: string;   // display string for the incoming value
+	current?: string;   // display string for the current Figma value (absent if new)
+	changed: boolean;   // true when incoming !== current
+};
+
+export type DiffStatus = 'new' | 'changed' | 'unchanged' | 'type-mismatch';
+
+export type DiffEntry = {
+	collection: string;
+	variableName: string;
+	resolvedType: 'COLOR' | 'FLOAT' | 'STRING';
+	status: DiffStatus;
+	modes: Record<string, ModeDiff>;
+};
+
+export type DiffResult = {
+	diffs: DiffEntry[];
+	warnings: string[];
+};
+
+// --- Diff helpers ---
+
+/** Convert an incoming ImportModeValue to a display string. */
+function importValueToDisplay(value: ImportModeValue, resolvedType: string, modeName: string): string {
+	if (isVarAliasRef(value)) return value.cssVar;
+	if (resolvedType === 'COLOR' && value !== null && typeof value === 'object' && 'r' in value) {
+		const c = value as FigmaColor;
+		if (c.a === 0) return 'transparent';
+		const h = (n: number) => Math.round(n * 255).toString(16).padStart(2, '0');
+		return c.a >= 1 ? `#${h(c.r)}${h(c.g)}${h(c.b)}` : `#${h(c.r)}${h(c.g)}${h(c.b)}${h(c.a)}`;
+	}
+	if (resolvedType === 'FLOAT' && typeof value === 'number') {
+		return modeName.toLowerCase() === 'vw' ? `${value}vw` : `${value}px`;
+	}
+	return String(value);
+}
+
+/** Convert a raw Figma variable value (from valuesByMode) to a display string. */
+async function currentValueToDisplay(
+	rawValue: any,
+	resolvedType: string,
+	modeName: string,
+	collectionsMap: Map<string, string>,
+): Promise<string> {
+	if (rawValue !== null && typeof rawValue === 'object' && rawValue.type === 'VARIABLE_ALIAS') {
+		const cssVar = await resolveAliasToString(rawValue.id, collectionsMap);
+		return cssVar ?? `alias:${rawValue.id}`;
+	}
+	if (resolvedType === 'COLOR' && rawValue !== null && typeof rawValue === 'object' && 'r' in rawValue) {
+		if (rawValue.a === 0) return 'transparent';
+		const h = (n: number) => Math.round(n * 255).toString(16).padStart(2, '0');
+		return rawValue.a >= 1
+			? `#${h(rawValue.r)}${h(rawValue.g)}${h(rawValue.b)}`
+			: `#${h(rawValue.r)}${h(rawValue.g)}${h(rawValue.b)}${h(rawValue.a)}`;
+	}
+	if (resolvedType === 'FLOAT' && typeof rawValue === 'number') {
+		return modeName.toLowerCase() === 'vw' ? `${rawValue}vw` : `${rawValue}px`;
+	}
+	return String(rawValue ?? '');
+}
+
+/**
+ * Read-only pass: compare each ImportEntry against the current Figma state.
+ * Returns DiffEntry[] describing what would change if the import were run.
+ */
+export async function diffImportEntries(entries: ImportEntry[]): Promise<DiffResult> {
+	const warnings: string[] = [];
+	const diffs: DiffEntry[] = [];
+
+	const existingCollections = await figma.variables.getLocalVariableCollectionsAsync();
+
+	// Build lookup maps
+	const collectionByName = new Map<string, any>();
+	const collectionsMap = new Map<string, string>(); // ID → name, for alias resolution
+	for (const col of existingCollections) {
+		collectionByName.set(col.name.toLowerCase().trim(), col);
+		collectionsMap.set(col.id, col.name);
+	}
+
+	// Fetch all variables per collection up front
+	const varsByCollection = new Map<string, Map<string, any>>();
+	for (const col of existingCollections) {
+		const vars = await Promise.all(
+			col.variableIds.map((id: string) => figma.variables.getVariableByIdAsync(id))
+		);
+		const varMap = new Map<string, any>();
+		for (const v of vars) {
+			if (v) varMap.set(v.name, v);
+		}
+		varsByCollection.set(col.name.toLowerCase().trim(), varMap);
+	}
+
+	for (const entry of entries) {
+		const existingCollection = collectionByName.get(entry.collection.toLowerCase().trim());
+		const existingVar = existingCollection
+			? varsByCollection.get(entry.collection.toLowerCase().trim())?.get(entry.variableName)
+			: undefined;
+
+		// Mode ID map for this collection
+		const modeMap = new Map<string, string>();
+		if (existingCollection) {
+			for (const m of existingCollection.modes) {
+				modeMap.set(m.name.toLowerCase(), m.modeId);
+			}
+		}
+
+		if (!existingVar) {
+			// Brand new variable
+			const modes: Record<string, ModeDiff> = {};
+			for (const [modeName, value] of Object.entries(entry.modes)) {
+				modes[modeName] = {
+					incoming: importValueToDisplay(value, entry.resolvedType, modeName),
+					changed: true,
+				};
+			}
+			diffs.push({ collection: entry.collection, variableName: entry.variableName, resolvedType: entry.resolvedType, status: 'new', modes });
+			continue;
+		}
+
+		if (existingVar.resolvedType !== entry.resolvedType) {
+			const modes: Record<string, ModeDiff> = {};
+			for (const [modeName, value] of Object.entries(entry.modes)) {
+				modes[modeName] = {
+					incoming: importValueToDisplay(value, entry.resolvedType, modeName),
+					changed: false,
+				};
+			}
+			diffs.push({ collection: entry.collection, variableName: entry.variableName, resolvedType: entry.resolvedType, status: 'type-mismatch', modes });
+			continue;
+		}
+
+		// Compare mode by mode
+		const modes: Record<string, ModeDiff> = {};
+		let anyChanged = false;
+
+		for (const [modeName, value] of Object.entries(entry.modes)) {
+			const incoming = importValueToDisplay(value, entry.resolvedType, modeName);
+			const modeId = modeMap.get(modeName.toLowerCase());
+
+			if (!modeId) {
+				// Mode doesn't exist yet — counts as new
+				modes[modeName] = { incoming, changed: true };
+				anyChanged = true;
+				continue;
+			}
+
+			const rawCurrent = existingVar.valuesByMode?.[modeId];
+			let current: string | undefined;
+			if (rawCurrent !== undefined) {
+				current = await currentValueToDisplay(rawCurrent, entry.resolvedType, modeName, collectionsMap);
+			}
+
+			const changed = current !== incoming;
+			if (changed) anyChanged = true;
+			modes[modeName] = { incoming, current, changed };
+		}
+
+		diffs.push({
+			collection: entry.collection,
+			variableName: entry.variableName,
+			resolvedType: entry.resolvedType,
+			status: anyChanged ? 'changed' : 'unchanged',
+			modes,
+		});
+	}
+
+	return { diffs, warnings };
 }
 
 // --- Figma writer ---
