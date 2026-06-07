@@ -55,11 +55,12 @@ export function parseColor(value: string): FigmaColor | null {
 	// rgba(r, g, b, a) or rgb(r, g, b)
 	const rgba = value.match(/^rgba?\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)\s*(?:,\s*([\d.]+))?\s*\)$/);
 	if (rgba) {
+		const clamp01 = (n: number) => Math.min(1, Math.max(0, n));
 		return {
-			r: parseInt(rgba[1]) / 255,
-			g: parseInt(rgba[2]) / 255,
-			b: parseInt(rgba[3]) / 255,
-			a: rgba[4] !== undefined ? parseFloat(rgba[4]) : 1,
+			r: clamp01(parseInt(rgba[1]) / 255),
+			g: clamp01(parseInt(rgba[2]) / 255),
+			b: clamp01(parseInt(rgba[3]) / 255),
+			a: clamp01(rgba[4] !== undefined ? parseFloat(rgba[4]) : 1),
 		};
 	}
 
@@ -74,12 +75,18 @@ export function parseColor(value: string): FigmaColor | null {
  */
 export function parseColorOrAlias(value: string | undefined): FigmaColor | VarAliasRef | null {
 	if (!value || typeof value !== 'string') return null;
-	if (value.startsWith('var(')) return { type: 'VAR_ALIAS', cssVar: value };
-	return parseColor(value);
+	const trimmed = value.trim();
+	if (trimmed.startsWith('var(')) return { type: 'VAR_ALIAS', cssVar: trimmed };
+	return parseColor(trimmed);
 }
 
 function isVarAliasRef(v: unknown): v is VarAliasRef {
-	return v !== null && typeof v === 'object' && (v as any).type === 'VAR_ALIAS';
+	return (
+		v !== null &&
+		typeof v === 'object' &&
+		(v as any).type === 'VAR_ALIAS' &&
+		typeof (v as any).cssVar === 'string'
+	);
 }
 
 /**

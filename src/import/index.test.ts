@@ -86,6 +86,26 @@ describe('parseColorOrAlias', () => {
 		expect(parseColorOrAlias('')).toBeNull();
 		expect(parseColorOrAlias(undefined)).toBeNull();
 	});
+
+	it('trims whitespace before matching var( or color', () => {
+		expect(parseColorOrAlias('  var(--token--color--blue-40v)  ')).toEqual<VarAliasRef>({
+			type: 'VAR_ALIAS',
+			cssVar: 'var(--token--color--blue-40v)',
+		});
+		expect(parseColorOrAlias('  #ff0000  ')).toEqual({ r: 1, g: 0, b: 0, a: 1 });
+	});
+
+	it('clamps out-of-range rgb components to [0, 1]', () => {
+		// rgb(300, 0, 0) would overflow without clamping
+		const result = parseColorOrAlias('rgb(300, 0, 0)');
+		expect(result).not.toBeNull();
+		expect((result as any).r).toBe(1);
+		expect((result as any).g).toBe(0);
+		expect((result as any).b).toBe(0);
+		// alpha > 1 clamped
+		const withAlpha = parseColorOrAlias('rgba(0, 0, 255, 2.5)');
+		expect((withAlpha as any).a).toBe(1);
+	});
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
