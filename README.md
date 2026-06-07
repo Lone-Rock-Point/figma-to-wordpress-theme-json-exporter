@@ -38,11 +38,11 @@ The plugin works in both directions:
 
 ## Usage
 
-The plugin has two commands, both available under **Menu > Plugins > WordPress Theme.json Export**.
+The plugin has two commands, both available under **Menu > Plugins > Development > WordPress Theme.json Export**.
 
 ### Export to theme.json
 
-1. Go to **Menu > Plugins > WordPress Theme.json Export > Export to theme.json**
+1. Go to **Menu > Plugins > Development > WordPress Theme.json Export > Export to theme.json**
 2. Click **Choose File** and upload your existing `theme.json`
 3. Click **Export Variables**
 4. Preview the result and click **Download Theme Files**
@@ -51,7 +51,7 @@ The plugin has two commands, both available under **Menu > Plugins > WordPress T
 
 Import reads a `theme.json` and syncs its color palette and custom values back into Figma variable collections, creating or updating variables as needed.
 
-1. Go to **Menu > Plugins > WordPress Theme.json Export > Import from theme.json**
+1. Go to **Menu > Plugins > Development > WordPress Theme.json Export > Import from theme.json**
 2. Paste your `theme.json` content into the text area
 3. Click **Preview Import** to see what will change before committing
 4. Review the diff, then click **Import Variables** to apply
@@ -154,7 +154,7 @@ elements/link/:hover/color/text  →  styles.elements.link.:hover.color.text
 **Import panel**
 - **Resizable**: Drag the bottom-right corner to resize
 - **Diff preview**: Color-coded status badges (NEW / UPDATED / = / ⚠) with inline old→new comparison for changed values
-- **Actionable import button**: Only enabled when there are variables to create or update; label shows the count
+- **Actionable import button**: Only appears when there are variables to create or update; label shows the count
 
 ## Development
 
