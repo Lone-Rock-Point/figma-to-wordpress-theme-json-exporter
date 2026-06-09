@@ -246,6 +246,11 @@
 		opacity: 0.5;
 		font-size: 10px;
 	}
+	.alias-varname {
+		font-family: var(--figma-font-family-mono, monospace);
+		font-size: 0.9em;
+		opacity: 0.85;
+	}
 
 	.entry-modes {
 		display: flex;
@@ -553,16 +558,18 @@
 	}
 
 	/**
-	 * Render a single display string (already converted to hex / px / cssVar by
-	 * the plugin's importValueToDisplay / currentValueToDisplay helpers).
-	 * Returns an HTML snippet — only safe values are interpolated directly.
+	 * Render a single display string. When isAlias is true the string is a resolved
+	 * Figma variable name (e.g. "palette/primary", "typography/fontFamilies/montserrat")
+	 * and gets an arrow prefix. Otherwise it's a literal value (hex, px, plain string).
 	 */
-	function renderDisplayString(str, resolvedType) {
+	function renderDisplayString(str, resolvedType, isAlias) {
 		if (!str) return '';
+		if (isAlias) {
+			// Resolved Figma variable name — show with arrow and monospace path styling
+			const s = String(str);
+			return `<span class="alias-arrow">→</span><span class="alias-varname">${escapeHtml(s.length > 48 ? s.slice(0, 47) + '…' : s)}</span>`;
+		}
 		if (resolvedType === 'COLOR') {
-			if (str.startsWith('var(')) {
-				return `<span class="alias-arrow">→</span>${escapeHtml(str)}`;
-			}
 			// str is a hex colour or 'transparent' built from numbers — safe to use in style attr
 			return `<span class="color-swatch" style="background:${str};"></span>${escapeHtml(str)}`;
 		}
@@ -571,18 +578,17 @@
 	}
 
 	function formatModeDiff(diff, modeName, modeDiff) {
-		const { incoming, current, changed } = modeDiff;
-		const inHtml = renderDisplayString(incoming, diff.resolvedType);
+		const { incoming, incomingIsAlias, current, currentIsAlias, changed } = modeDiff;
+		const inHtml = renderDisplayString(incoming, diff.resolvedType, incomingIsAlias);
 
 		if (!current) {
-			// New variable or new mode — just show incoming
 			return inHtml;
 		}
 		if (!changed) {
 			return `<span class="diff-unchanged">${inHtml}</span>`;
 		}
 		// Changed — show old → new
-		const curHtml = renderDisplayString(current, diff.resolvedType);
+		const curHtml = renderDisplayString(current, diff.resolvedType, currentIsAlias);
 		return `<span class="diff-old">${curHtml}</span><span class="diff-arrow">→</span><span class="diff-new">${inHtml}</span>`;
 	}
 

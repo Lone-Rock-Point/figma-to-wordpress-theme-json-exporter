@@ -331,9 +331,11 @@ export function parseThemeJson(theme: any): ParseResult {
 
 /** Per-mode comparison between what's in Figma now and what the import would set. */
 export type ModeDiff = {
-	incoming: string;   // display string for the incoming value
-	current?: string;   // display string for the current Figma value (absent if new)
-	changed: boolean;   // true when incoming !== current
+	incoming: string;         // display string for the incoming value
+	incomingIsAlias?: boolean; // true when incoming is a resolved Figma variable name
+	current?: string;          // display string for the current Figma value (absent if new)
+	currentIsAlias?: boolean;  // true when current is a resolved Figma variable name
+	changed: boolean;          // true when incoming !== current
 };
 
 export type DiffStatus = 'new' | 'changed' | 'unchanged' | 'type-mismatch';
@@ -452,14 +454,34 @@ export async function diffImportEntries(entries: ImportEntry[]): Promise<DiffRes
 			}
 		}
 
+		// Build per-mode display strings. For alias values, resolve to the target Figma
+		// variable name so the preview shows "→ palette/primary" instead of the raw
+		// CSS var string. Both incoming and current use the same format for comparison.
+		const resolveIncoming = async (value: ImportModeValue, modeName: string): Promise<{ text: string; isAlias: boolean }> => {
+			if (isVarAliasRef(value)) {
+				const targetId = await resolveVarRef(value.cssVar, existingCollections, varLookupCache);
+				if (targetId) {
+					const v = await figma.variables.getVariableByIdAsync(targetId);
+					if (v) return { text: v.name, isAlias: true };
+				}
+				return { text: value.cssVar, isAlias: true }; // fallback: show CSS var
+			}
+			return { text: importValueToDisplay(value, effectiveResolvedType, modeName), isAlias: false };
+		};
+
+		const resolveCurrent = async (rawValue: any, modeName: string): Promise<{ text: string; isAlias: boolean }> => {
+			if (rawValue !== null && typeof rawValue === 'object' && rawValue.type === 'VARIABLE_ALIAS') {
+				const v = await figma.variables.getVariableByIdAsync(rawValue.id);
+				return { text: v?.name ?? `alias:${rawValue.id}`, isAlias: true };
+			}
+			return { text: await currentValueToDisplay(rawValue, effectiveResolvedType, modeName, collectionsMap), isAlias: false };
+		};
+
 		if (!existingVar) {
-			// Brand new variable
 			const modes: Record<string, ModeDiff> = {};
 			for (const [modeName, value] of Object.entries(entry.modes)) {
-				modes[modeName] = {
-					incoming: importValueToDisplay(value, effectiveResolvedType, modeName),
-					changed: true,
-				};
+				const { text, isAlias } = await resolveIncoming(value, modeName);
+				modes[modeName] = { incoming: text, incomingIsAlias: isAlias || undefined, changed: true };
 			}
 			diffs.push({ collection: entry.collection, variableName: entry.variableName, resolvedType: effectiveResolvedType, status: 'new', modes });
 			continue;
@@ -468,10 +490,8 @@ export async function diffImportEntries(entries: ImportEntry[]): Promise<DiffRes
 		if (existingVar.resolvedType !== effectiveResolvedType) {
 			const modes: Record<string, ModeDiff> = {};
 			for (const [modeName, value] of Object.entries(entry.modes)) {
-				modes[modeName] = {
-					incoming: importValueToDisplay(value, effectiveResolvedType, modeName),
-					changed: false,
-				};
+				const { text, isAlias } = await resolveIncoming(value, modeName);
+				modes[modeName] = { incoming: text, incomingIsAlias: isAlias || undefined, changed: false };
 			}
 			diffs.push({ collection: entry.collection, variableName: entry.variableName, resolvedType: effectiveResolvedType, status: 'type-mismatch', modes });
 			continue;
@@ -482,25 +502,33 @@ export async function diffImportEntries(entries: ImportEntry[]): Promise<DiffRes
 		let anyChanged = false;
 
 		for (const [modeName, value] of Object.entries(entry.modes)) {
-			const incoming = importValueToDisplay(value, effectiveResolvedType, modeName);
+			const { text: incomingText, isAlias: incomingIsAlias } = await resolveIncoming(value, modeName);
 			const modeId = modeMap.get(modeName.toLowerCase());
 
 			if (!modeId) {
-				// Mode doesn't exist yet — counts as new
-				modes[modeName] = { incoming, changed: true };
+				modes[modeName] = { incoming: incomingText, incomingIsAlias: incomingIsAlias || undefined, changed: true };
 				anyChanged = true;
 				continue;
 			}
 
 			const rawCurrent = existingVar.valuesByMode?.[modeId];
-			let current: string | undefined;
+			let currentText: string | undefined;
+			let currentIsAlias = false;
 			if (rawCurrent !== undefined) {
-				current = await currentValueToDisplay(rawCurrent, effectiveResolvedType, modeName, collectionsMap);
+				const resolved = await resolveCurrent(rawCurrent, modeName);
+				currentText = resolved.text;
+				currentIsAlias = resolved.isAlias;
 			}
 
-			const changed = current !== incoming;
+			const changed = currentText !== incomingText;
 			if (changed) anyChanged = true;
-			modes[modeName] = { incoming, current, changed };
+			modes[modeName] = {
+				incoming: incomingText,
+				incomingIsAlias: incomingIsAlias || undefined,
+				current: currentText,
+				currentIsAlias: currentIsAlias || undefined,
+				changed,
+			};
 		}
 
 		diffs.push({
