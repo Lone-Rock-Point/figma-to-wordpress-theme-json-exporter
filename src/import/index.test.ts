@@ -751,9 +751,10 @@ describe('writeImportEntries', () => {
 		expect(result.warnings.some(w => w.includes('could not resolve') && w.includes('literal string'))).toBe(true);
 	});
 
-	it('falls back to literal string for STRING VarAliasRef when target variable is a different type (e.g. COLOR)', async () => {
-		// STRING variable in styles references a var() that resolves to a COLOR variable.
-		// Figma rejects STRING→COLOR aliases, so we must store the literal string instead.
+	it('uses the target variable type when creating a STRING VarAliasRef that resolves to a COLOR variable', async () => {
+		// styles/color/text should be a COLOR VARIABLE_ALIAS pointing at settings [color]/palette/primary.
+		// flattenToEntries emits STRING as a placeholder, but the target is COLOR — so the
+		// effective type should be COLOR and the alias should be set correctly.
 		const colorVar = makeVariable({ name: 'palette/primary', resolvedType: 'COLOR', id: 'color-var-id' });
 		const colorCollection = makeCollection({
 			name: 'settings [color]',
@@ -767,7 +768,7 @@ describe('writeImportEntries', () => {
 		);
 		mockFigma.teamLibrary.getAvailableLibraryVariableCollectionsAsync.mockResolvedValue([]);
 
-		const newVar = makeVariable({ name: 'color/text', resolvedType: 'STRING' });
+		const newVar = makeVariable({ name: 'color/text', resolvedType: 'COLOR' });
 		mockFigma.variables.createVariable.mockReturnValue(newVar);
 
 		const aliasEntry: ImportEntry = {
@@ -779,10 +780,10 @@ describe('writeImportEntries', () => {
 
 		const result = await writeImportEntries([aliasEntry]);
 
-		// Variable is created but value is the literal CSS var string, NOT a VARIABLE_ALIAS
-		expect(mockFigma.variables.createVariable).toHaveBeenCalled();
-		expect(newVar.setValueForMode).toHaveBeenCalledWith(expect.any(String), 'var(--wp--preset--color--primary)');
-		expect(result).toMatchObject({ created: 1, updated: 0, skipped: 0 });
+		// Variable is created as COLOR (target's type) and value is a VARIABLE_ALIAS
+		expect(mockFigma.variables.createVariable).toHaveBeenCalledWith('color/text', expect.anything(), 'COLOR');
+		expect(newVar.setValueForMode).toHaveBeenCalledWith(expect.any(String), { type: 'VARIABLE_ALIAS', id: 'color-var-id' });
+		expect(result).toMatchObject({ created: 1, updated: 0, skipped: 0, warnings: [] });
 	});
 
 	it('skips (does not create) a variable when its VarAliasRef target cannot be found', async () => {
