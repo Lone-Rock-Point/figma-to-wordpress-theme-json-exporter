@@ -726,14 +726,11 @@ describe('writeImportEntries', () => {
 		expect(result).toMatchObject({ created: 1, updated: 0, skipped: 0, warnings: [] });
 	});
 
-	it('falls back to literal string for STRING VarAliasRef when target cannot be resolved', async () => {
+	it('skips a STRING VarAliasRef variable when its target cannot be resolved', async () => {
 		const stylesCollection = makeCollection({ variableIds: [] });
 
 		mockFigma.variables.getLocalVariableCollectionsAsync.mockResolvedValue([stylesCollection]);
 		mockFigma.teamLibrary.getAvailableLibraryVariableCollectionsAsync.mockResolvedValue([]);
-
-		const newVar = makeVariable({ name: 'typography/fontFamily', resolvedType: 'STRING' });
-		mockFigma.variables.createVariable.mockReturnValue(newVar);
 
 		const aliasEntry: ImportEntry = {
 			collection: 'styles',
@@ -744,11 +741,9 @@ describe('writeImportEntries', () => {
 
 		const result = await writeImportEntries([aliasEntry]);
 
-		// Variable IS created with the literal CSS var string as fallback
-		expect(mockFigma.variables.createVariable).toHaveBeenCalled();
-		expect(newVar.setValueForMode).toHaveBeenCalledWith(expect.any(String), 'var(--wp--preset--font-family--body)');
-		expect(result).toMatchObject({ created: 1, updated: 0, skipped: 0 });
-		expect(result.warnings.some(w => w.includes('could not resolve') && w.includes('literal string'))).toBe(true);
+		expect(mockFigma.variables.createVariable).not.toHaveBeenCalled();
+		expect(result).toMatchObject({ created: 0, updated: 0, skipped: 1 });
+		expect(result.warnings.some(w => w.includes('Skipping') && w.includes('could not resolve'))).toBe(true);
 	});
 
 	it('uses the target variable type when creating a STRING VarAliasRef that resolves to a COLOR variable', async () => {

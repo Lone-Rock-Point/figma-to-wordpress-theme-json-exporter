@@ -704,21 +704,12 @@ export async function writeImportEntries(entries: ImportEntry[]): Promise<WriteR
 				if (isVarAliasRef(value)) {
 					const targetId = await resolveVarRef(value.cssVar, existingCollections, varLookupCache);
 					if (!targetId) {
-						// Alias target not found — fall back to the literal CSS var string.
-						// A COLOR variable with no value is invalid in Figma, so skip it entirely.
-						if (effectiveResolvedType === 'COLOR') {
-							warnings.push(
-								`Skipping "${entry.variableName}" — could not resolve "${value.cssVar}". ` +
-								`Enable the library that contains this variable in your Figma file, then re-import.`
-							);
-							hasUnresolvableAlias = true;
-							break;
-						}
 						warnings.push(
-							`"${entry.variableName}": could not resolve "${value.cssVar}" to a Figma variable — ` +
-							`stored as a literal string. Enable the library and re-import to link the alias.`
+							`Skipping "${entry.variableName}" — could not resolve "${value.cssVar}". ` +
+							`Enable the library that contains this variable in your Figma file, then re-import.`
 						);
-						resolvedModes[modeName] = value.cssVar;
+						hasUnresolvableAlias = true;
+						break;
 					} else {
 						// Use the target variable's type — it is the source of truth for what type
 						// this variable should be (e.g. var(--wp--preset--color--primary) → COLOR).
