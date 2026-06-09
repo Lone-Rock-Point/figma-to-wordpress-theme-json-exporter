@@ -705,11 +705,12 @@ describe('writeImportEntries', () => {
 		// Library has a !-usa collection containing the target variable
 		const libCollection = { key: 'lib-col-key', name: '!-usa', libraryName: 'USWDS Tokens' };
 		const libVar = { key: 'lib-var-key', name: 'color/orange-50v', resolvedType: 'COLOR' };
-		const importedVar = { id: 'imported-var-id' };
+		const importedVar = { id: 'imported-var-id', resolvedType: 'COLOR' };
 
 		mockFigma.teamLibrary.getAvailableLibraryVariableCollectionsAsync.mockResolvedValue([libCollection]);
 		mockFigma.teamLibrary.getVariablesInLibraryCollectionAsync.mockResolvedValue([libVar]);
 		mockFigma.variables.importVariableByKeyAsync.mockResolvedValue(importedVar);
+		mockFigma.variables.getVariableByIdAsync.mockResolvedValue(importedVar);
 
 		const aliasEntry: ImportEntry = {
 			collection: 'settings [color]',
@@ -748,6 +749,40 @@ describe('writeImportEntries', () => {
 		expect(newVar.setValueForMode).toHaveBeenCalledWith(expect.any(String), 'var(--wp--preset--font-family--body)');
 		expect(result).toMatchObject({ created: 1, updated: 0, skipped: 0 });
 		expect(result.warnings.some(w => w.includes('could not resolve') && w.includes('literal string'))).toBe(true);
+	});
+
+	it('falls back to literal string for STRING VarAliasRef when target variable is a different type (e.g. COLOR)', async () => {
+		// STRING variable in styles references a var() that resolves to a COLOR variable.
+		// Figma rejects STRING→COLOR aliases, so we must store the literal string instead.
+		const colorVar = makeVariable({ name: 'palette/primary', resolvedType: 'COLOR', id: 'color-var-id' });
+		const colorCollection = makeCollection({
+			name: 'settings [color]',
+			variableIds: ['color-var-id'],
+		});
+		const stylesCollection = makeCollection({ name: 'styles', variableIds: [] });
+
+		mockFigma.variables.getLocalVariableCollectionsAsync.mockResolvedValue([colorCollection, stylesCollection]);
+		mockFigma.variables.getVariableByIdAsync.mockImplementation((id: string) =>
+			Promise.resolve(id === 'color-var-id' ? colorVar : null)
+		);
+		mockFigma.teamLibrary.getAvailableLibraryVariableCollectionsAsync.mockResolvedValue([]);
+
+		const newVar = makeVariable({ name: 'color/text', resolvedType: 'STRING' });
+		mockFigma.variables.createVariable.mockReturnValue(newVar);
+
+		const aliasEntry: ImportEntry = {
+			collection: 'styles',
+			variableName: 'color/text',
+			resolvedType: 'STRING',
+			modes: { Default: { type: 'VAR_ALIAS', cssVar: 'var(--wp--preset--color--primary)' } as VarAliasRef },
+		};
+
+		const result = await writeImportEntries([aliasEntry]);
+
+		// Variable is created but value is the literal CSS var string, NOT a VARIABLE_ALIAS
+		expect(mockFigma.variables.createVariable).toHaveBeenCalled();
+		expect(newVar.setValueForMode).toHaveBeenCalledWith(expect.any(String), 'var(--wp--preset--color--primary)');
+		expect(result).toMatchObject({ created: 1, updated: 0, skipped: 0 });
 	});
 
 	it('skips (does not create) a variable when its VarAliasRef target cannot be found', async () => {

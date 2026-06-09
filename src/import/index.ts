@@ -701,7 +701,15 @@ export async function writeImportEntries(entries: ImportEntry[]): Promise<WriteR
 						);
 						resolvedModes[modeName] = value.cssVar;
 					} else {
-						resolvedModes[modeName] = { type: 'VARIABLE_ALIAS', id: targetId };
+						// Only alias if the target variable is the same type — Figma rejects
+						// cross-type aliases (e.g. STRING → COLOR). If the types differ, fall
+						// back to the literal CSS var string so the value is still meaningful.
+						const targetVar = await figma.variables.getVariableByIdAsync(targetId);
+						if (targetVar && targetVar.resolvedType === entry.resolvedType) {
+							resolvedModes[modeName] = { type: 'VARIABLE_ALIAS', id: targetId };
+						} else {
+							resolvedModes[modeName] = value.cssVar;
+						}
 					}
 				} else {
 					resolvedModes[modeName] = value;
