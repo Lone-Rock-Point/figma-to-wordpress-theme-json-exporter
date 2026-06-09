@@ -137,13 +137,25 @@ function flattenToEntries(
 		if (val !== null && typeof val === 'object' && !Array.isArray(val)) {
 			flattenToEntries(val, currentPath, collection, entries, warnings);
 		} else if (typeof val === 'string') {
-			const { resolvedType, parsedValue } = parseCustomValue(val);
-			entries.push({
-				collection,
-				variableName: currentPath.join('/'),
-				resolvedType,
-				modes: { Default: parsedValue },
-			});
+			const trimmed = val.trim();
+			if (trimmed.startsWith('var(')) {
+				// CSS var reference — store as VarAliasRef so we can re-link it
+				// to a Figma VARIABLE_ALIAS at write time (fallback: literal string).
+				entries.push({
+					collection,
+					variableName: currentPath.join('/'),
+					resolvedType: 'STRING',
+					modes: { Default: { type: 'VAR_ALIAS', cssVar: trimmed } as VarAliasRef },
+				});
+			} else {
+				const { resolvedType, parsedValue } = parseCustomValue(trimmed);
+				entries.push({
+					collection,
+					variableName: currentPath.join('/'),
+					resolvedType,
+					modes: { Default: parsedValue },
+				});
+			}
 		} else if (typeof val === 'number') {
 			entries.push({
 				collection,
@@ -672,14 +684,25 @@ export async function writeImportEntries(entries: ImportEntry[]): Promise<WriteR
 				if (isVarAliasRef(value)) {
 					const targetId = await resolveVarRef(value.cssVar, existingCollections, varLookupCache);
 					if (!targetId) {
+						if (entry.resolvedType === 'COLOR') {
+							// Color aliases must resolve — a COLOR variable with no value is invalid.
+							warnings.push(
+								`Skipping "${entry.variableName}" — could not resolve "${value.cssVar}". ` +
+								`Enable the library that contains this variable in your Figma file, then re-import.`
+							);
+							hasUnresolvableAlias = true;
+							break;
+						}
+						// Non-color (STRING): store the literal CSS var string as a fallback so the
+						// variable is still created/updated with a meaningful value.
 						warnings.push(
-							`Skipping "${entry.variableName}" — could not resolve "${value.cssVar}". ` +
-							`Enable the library that contains this variable in your Figma file, then re-import.`
+							`"${entry.variableName}": could not resolve "${value.cssVar}" to a Figma variable — ` +
+							`stored as a literal string. Enable the library and re-import to link the alias.`
 						);
-						hasUnresolvableAlias = true;
-						break;
+						resolvedModes[modeName] = value.cssVar;
+					} else {
+						resolvedModes[modeName] = { type: 'VARIABLE_ALIAS', id: targetId };
 					}
-					resolvedModes[modeName] = { type: 'VARIABLE_ALIAS', id: targetId };
 				} else {
 					resolvedModes[modeName] = value;
 				}
