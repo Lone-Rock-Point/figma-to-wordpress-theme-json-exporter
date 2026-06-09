@@ -137,13 +137,25 @@ function flattenToEntries(
 		if (val !== null && typeof val === 'object' && !Array.isArray(val)) {
 			flattenToEntries(val, currentPath, collection, entries, warnings);
 		} else if (typeof val === 'string') {
-			const { resolvedType, parsedValue } = parseCustomValue(val);
-			entries.push({
-				collection,
-				variableName: currentPath.join('/'),
-				resolvedType,
-				modes: { Default: parsedValue },
-			});
+			const trimmed = val.trim();
+			if (trimmed.startsWith('var(')) {
+				// CSS var reference — store as VarAliasRef so we can re-link it
+				// to a Figma VARIABLE_ALIAS at write time (fallback: literal string).
+				entries.push({
+					collection,
+					variableName: currentPath.join('/'),
+					resolvedType: 'STRING',
+					modes: { Default: { type: 'VAR_ALIAS', cssVar: trimmed } as VarAliasRef },
+				});
+			} else {
+				const { resolvedType, parsedValue } = parseCustomValue(trimmed);
+				entries.push({
+					collection,
+					variableName: currentPath.join('/'),
+					resolvedType,
+					modes: { Default: parsedValue },
+				});
+			}
 		} else if (typeof val === 'number') {
 			entries.push({
 				collection,
@@ -389,6 +401,7 @@ export async function diffImportEntries(entries: ImportEntry[]): Promise<DiffRes
 	const diffs: DiffEntry[] = [];
 
 	const existingCollections = await figma.variables.getLocalVariableCollectionsAsync();
+	const varLookupCache = new Map<string, Map<string, string>>();
 
 	// Build lookup maps
 	const collectionByName = new Map<string, any>();
@@ -425,28 +438,42 @@ export async function diffImportEntries(entries: ImportEntry[]): Promise<DiffRes
 			}
 		}
 
+		// Resolve the effective type: if all modes are VarAliasRef, the target variable's
+		// type is authoritative (e.g. var(--wp--preset--color--primary) → COLOR, not STRING).
+		let effectiveResolvedType: 'COLOR' | 'FLOAT' | 'STRING' = entry.resolvedType;
+		for (const value of Object.values(entry.modes)) {
+			if (isVarAliasRef(value)) {
+				const targetId = await resolveVarRef(value.cssVar, existingCollections, varLookupCache);
+				if (targetId) {
+					const targetVar = await figma.variables.getVariableByIdAsync(targetId);
+					if (targetVar) effectiveResolvedType = targetVar.resolvedType as 'COLOR' | 'FLOAT' | 'STRING';
+				}
+				break; // all modes share the same type; one lookup is enough
+			}
+		}
+
 		if (!existingVar) {
 			// Brand new variable
 			const modes: Record<string, ModeDiff> = {};
 			for (const [modeName, value] of Object.entries(entry.modes)) {
 				modes[modeName] = {
-					incoming: importValueToDisplay(value, entry.resolvedType, modeName),
+					incoming: importValueToDisplay(value, effectiveResolvedType, modeName),
 					changed: true,
 				};
 			}
-			diffs.push({ collection: entry.collection, variableName: entry.variableName, resolvedType: entry.resolvedType, status: 'new', modes });
+			diffs.push({ collection: entry.collection, variableName: entry.variableName, resolvedType: effectiveResolvedType, status: 'new', modes });
 			continue;
 		}
 
-		if (existingVar.resolvedType !== entry.resolvedType) {
+		if (existingVar.resolvedType !== effectiveResolvedType) {
 			const modes: Record<string, ModeDiff> = {};
 			for (const [modeName, value] of Object.entries(entry.modes)) {
 				modes[modeName] = {
-					incoming: importValueToDisplay(value, entry.resolvedType, modeName),
+					incoming: importValueToDisplay(value, effectiveResolvedType, modeName),
 					changed: false,
 				};
 			}
-			diffs.push({ collection: entry.collection, variableName: entry.variableName, resolvedType: entry.resolvedType, status: 'type-mismatch', modes });
+			diffs.push({ collection: entry.collection, variableName: entry.variableName, resolvedType: effectiveResolvedType, status: 'type-mismatch', modes });
 			continue;
 		}
 
@@ -455,7 +482,7 @@ export async function diffImportEntries(entries: ImportEntry[]): Promise<DiffRes
 		let anyChanged = false;
 
 		for (const [modeName, value] of Object.entries(entry.modes)) {
-			const incoming = importValueToDisplay(value, entry.resolvedType, modeName);
+			const incoming = importValueToDisplay(value, effectiveResolvedType, modeName);
 			const modeId = modeMap.get(modeName.toLowerCase());
 
 			if (!modeId) {
@@ -468,7 +495,7 @@ export async function diffImportEntries(entries: ImportEntry[]): Promise<DiffRes
 			const rawCurrent = existingVar.valuesByMode?.[modeId];
 			let current: string | undefined;
 			if (rawCurrent !== undefined) {
-				current = await currentValueToDisplay(rawCurrent, entry.resolvedType, modeName, collectionsMap);
+				current = await currentValueToDisplay(rawCurrent, effectiveResolvedType, modeName, collectionsMap);
 			}
 
 			const changed = current !== incoming;
@@ -479,7 +506,7 @@ export async function diffImportEntries(entries: ImportEntry[]): Promise<DiffRes
 		diffs.push({
 			collection: entry.collection,
 			variableName: entry.variableName,
-			resolvedType: entry.resolvedType,
+			resolvedType: effectiveResolvedType,
 			status: anyChanged ? 'changed' : 'unchanged',
 			modes,
 		});
@@ -668,6 +695,11 @@ export async function writeImportEntries(entries: ImportEntry[]): Promise<WriteR
 			// (library not enabled, collection not present), skip the entire entry.
 			const resolvedModes: Record<string, any> = {};
 			let hasUnresolvableAlias = false;
+			// When a var() reference resolves to a target variable, the TARGET's type is
+			// authoritative — e.g. flattenToEntries emits STRING for all var() values but
+			// styles/color/text should actually be COLOR because its target is a COLOR variable.
+			let effectiveResolvedType: 'COLOR' | 'FLOAT' | 'STRING' = entry.resolvedType;
+
 			for (const [modeName, value] of Object.entries(entry.modes)) {
 				if (isVarAliasRef(value)) {
 					const targetId = await resolveVarRef(value.cssVar, existingCollections, varLookupCache);
@@ -678,8 +710,15 @@ export async function writeImportEntries(entries: ImportEntry[]): Promise<WriteR
 						);
 						hasUnresolvableAlias = true;
 						break;
+					} else {
+						// Use the target variable's type — it is the source of truth for what type
+						// this variable should be (e.g. var(--wp--preset--color--primary) → COLOR).
+						const targetVar = await figma.variables.getVariableByIdAsync(targetId);
+						if (targetVar) {
+							effectiveResolvedType = targetVar.resolvedType as 'COLOR' | 'FLOAT' | 'STRING';
+						}
+						resolvedModes[modeName] = { type: 'VARIABLE_ALIAS', id: targetId };
 					}
-					resolvedModes[modeName] = { type: 'VARIABLE_ALIAS', id: targetId };
 				} else {
 					resolvedModes[modeName] = value;
 				}
@@ -694,14 +733,14 @@ export async function writeImportEntries(entries: ImportEntry[]): Promise<WriteR
 
 			if (isNew) {
 				try {
-					variable = figma.variables.createVariable(entry.variableName, collection, entry.resolvedType);
+					variable = figma.variables.createVariable(entry.variableName, collection, effectiveResolvedType);
 				} catch (err) {
 					warnings.push(`Could not create variable "${entry.variableName}": ${err instanceof Error ? err.message : String(err)}`);
 					skipped++;
 					continue;
 				}
-			} else if (variable.resolvedType !== entry.resolvedType) {
-				warnings.push(`Skipping "${entry.variableName}" — existing variable type (${variable.resolvedType}) does not match import type (${entry.resolvedType}).`);
+			} else if (variable.resolvedType !== effectiveResolvedType) {
+				warnings.push(`Skipping "${entry.variableName}" — existing variable type (${variable.resolvedType}) does not match import type (${effectiveResolvedType}).`);
 				skipped++;
 				continue;
 			}

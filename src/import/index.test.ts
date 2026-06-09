@@ -366,15 +366,36 @@ describe('parseThemeJson', () => {
 			},
 		});
 		expect(entries).toHaveLength(2);
+		// var() reference becomes a VarAliasRef so the alias can be re-linked in Figma
 		expect(entries.find(e => e.variableName === 'color/link/default')).toMatchObject({
 			collection: 'settings [custom]',
 			resolvedType: 'STRING',
-			modes: { Default: 'var(--wp--preset--color--primary)' },
+			modes: { Default: { type: 'VAR_ALIAS', cssVar: 'var(--wp--preset--color--primary)' } },
 		});
 		expect(entries.find(e => e.variableName === 'spacing/offset')).toMatchObject({
 			collection: 'settings [custom]',
 			resolvedType: 'FLOAT',
 			modes: { Default: 8 },
+		});
+	});
+
+	it('treats var() references in settings.custom as VarAliasRef (STRING type)', () => {
+		const { entries } = parseThemeJson({
+			settings: {
+				custom: {
+					type: { weight: { bold: 'var(--theme--type--weight--bold)' } },
+					typography: { fontFamily: { base: 'var(--wp--preset--font-family--body)' } },
+				},
+			},
+		});
+		expect(entries).toHaveLength(2);
+		expect(entries.find(e => e.variableName === 'type/weight/bold')).toMatchObject({
+			resolvedType: 'STRING',
+			modes: { Default: { type: 'VAR_ALIAS', cssVar: 'var(--theme--type--weight--bold)' } },
+		});
+		expect(entries.find(e => e.variableName === 'typography/fontFamily/base')).toMatchObject({
+			resolvedType: 'STRING',
+			modes: { Default: { type: 'VAR_ALIAS', cssVar: 'var(--wp--preset--font-family--body)' } },
 		});
 	});
 
@@ -395,17 +416,28 @@ describe('parseThemeJson', () => {
 
 	// --- styles ---
 
-	it('flattens styles into styles entries', () => {
+	it('flattens styles into styles entries, treating var() references as VarAliasRef', () => {
 		const { entries } = parseThemeJson({
 			styles: {
 				elements: { link: { color: { text: 'var(--wp--preset--color--primary)' } } },
+				typography: { fontFamily: 'var(--wp--preset--font-family--body)' },
+				color: { text: '#333333' },
 			},
 		});
-		expect(entries[0]).toMatchObject({
+		expect(entries.find(e => e.variableName === 'elements/link/color/text')).toMatchObject({
 			collection: 'styles',
-			variableName: 'elements/link/color/text',
 			resolvedType: 'STRING',
-			modes: { Default: 'var(--wp--preset--color--primary)' },
+			modes: { Default: { type: 'VAR_ALIAS', cssVar: 'var(--wp--preset--color--primary)' } },
+		});
+		expect(entries.find(e => e.variableName === 'typography/fontFamily')).toMatchObject({
+			collection: 'styles',
+			resolvedType: 'STRING',
+			modes: { Default: { type: 'VAR_ALIAS', cssVar: 'var(--wp--preset--font-family--body)' } },
+		});
+		// Plain hex values remain as literal strings
+		expect(entries.find(e => e.variableName === 'color/text')).toMatchObject({
+			resolvedType: 'STRING',
+			modes: { Default: '#333333' },
 		});
 	});
 
@@ -673,11 +705,12 @@ describe('writeImportEntries', () => {
 		// Library has a !-usa collection containing the target variable
 		const libCollection = { key: 'lib-col-key', name: '!-usa', libraryName: 'USWDS Tokens' };
 		const libVar = { key: 'lib-var-key', name: 'color/orange-50v', resolvedType: 'COLOR' };
-		const importedVar = { id: 'imported-var-id' };
+		const importedVar = { id: 'imported-var-id', resolvedType: 'COLOR' };
 
 		mockFigma.teamLibrary.getAvailableLibraryVariableCollectionsAsync.mockResolvedValue([libCollection]);
 		mockFigma.teamLibrary.getVariablesInLibraryCollectionAsync.mockResolvedValue([libVar]);
 		mockFigma.variables.importVariableByKeyAsync.mockResolvedValue(importedVar);
+		mockFigma.variables.getVariableByIdAsync.mockResolvedValue(importedVar);
 
 		const aliasEntry: ImportEntry = {
 			collection: 'settings [color]',
@@ -690,6 +723,61 @@ describe('writeImportEntries', () => {
 
 		expect(mockFigma.variables.importVariableByKeyAsync).toHaveBeenCalledWith('lib-var-key');
 		expect(newVar.setValueForMode).toHaveBeenCalledWith('m1', { type: 'VARIABLE_ALIAS', id: 'imported-var-id' });
+		expect(result).toMatchObject({ created: 1, updated: 0, skipped: 0, warnings: [] });
+	});
+
+	it('skips a STRING VarAliasRef variable when its target cannot be resolved', async () => {
+		const stylesCollection = makeCollection({ variableIds: [] });
+
+		mockFigma.variables.getLocalVariableCollectionsAsync.mockResolvedValue([stylesCollection]);
+		mockFigma.teamLibrary.getAvailableLibraryVariableCollectionsAsync.mockResolvedValue([]);
+
+		const aliasEntry: ImportEntry = {
+			collection: 'styles',
+			variableName: 'typography/fontFamily',
+			resolvedType: 'STRING',
+			modes: { Default: { type: 'VAR_ALIAS', cssVar: 'var(--wp--preset--font-family--body)' } as VarAliasRef },
+		};
+
+		const result = await writeImportEntries([aliasEntry]);
+
+		expect(mockFigma.variables.createVariable).not.toHaveBeenCalled();
+		expect(result).toMatchObject({ created: 0, updated: 0, skipped: 1 });
+		expect(result.warnings.some(w => w.includes('Skipping') && w.includes('could not resolve'))).toBe(true);
+	});
+
+	it('uses the target variable type when creating a STRING VarAliasRef that resolves to a COLOR variable', async () => {
+		// styles/color/text should be a COLOR VARIABLE_ALIAS pointing at settings [color]/palette/primary.
+		// flattenToEntries emits STRING as a placeholder, but the target is COLOR — so the
+		// effective type should be COLOR and the alias should be set correctly.
+		const colorVar = makeVariable({ name: 'palette/primary', resolvedType: 'COLOR', id: 'color-var-id' });
+		const colorCollection = makeCollection({
+			name: 'settings [color]',
+			variableIds: ['color-var-id'],
+		});
+		const stylesCollection = makeCollection({ name: 'styles', variableIds: [] });
+
+		mockFigma.variables.getLocalVariableCollectionsAsync.mockResolvedValue([colorCollection, stylesCollection]);
+		mockFigma.variables.getVariableByIdAsync.mockImplementation((id: string) =>
+			Promise.resolve(id === 'color-var-id' ? colorVar : null)
+		);
+		mockFigma.teamLibrary.getAvailableLibraryVariableCollectionsAsync.mockResolvedValue([]);
+
+		const newVar = makeVariable({ name: 'color/text', resolvedType: 'COLOR' });
+		mockFigma.variables.createVariable.mockReturnValue(newVar);
+
+		const aliasEntry: ImportEntry = {
+			collection: 'styles',
+			variableName: 'color/text',
+			resolvedType: 'STRING',
+			modes: { Default: { type: 'VAR_ALIAS', cssVar: 'var(--wp--preset--color--primary)' } as VarAliasRef },
+		};
+
+		const result = await writeImportEntries([aliasEntry]);
+
+		// Variable is created as COLOR (target's type) and value is a VARIABLE_ALIAS
+		expect(mockFigma.variables.createVariable).toHaveBeenCalledWith('color/text', expect.anything(), 'COLOR');
+		expect(newVar.setValueForMode).toHaveBeenCalledWith(expect.any(String), { type: 'VARIABLE_ALIAS', id: 'color-var-id' });
 		expect(result).toMatchObject({ created: 1, updated: 0, skipped: 0, warnings: [] });
 	});
 
