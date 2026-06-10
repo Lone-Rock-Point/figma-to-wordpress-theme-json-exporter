@@ -353,6 +353,70 @@ export type DiffResult = {
 	warnings: string[];
 };
 
+// --- CSS var → display name inference ---
+
+/**
+ * Infer a human-readable Figma variable path from a CSS var string.
+ *
+ * Used as a fallback in the diff preview when the target variable doesn't exist
+ * in Figma yet (e.g. first-time import). This reverses the logic of
+ * transformTokenReference so the preview shows a meaningful name instead of the
+ * raw CSS var string.
+ *
+ * Examples:
+ *   var(--wp--preset--color--primary-lighter)       → palette/primary-lighter
+ *   var(--wp--preset--font-family--montserrat)       → typography/fontFamilies/montserrat
+ *   var(--wp--preset--font-size--x-large)            → font-size/x-large
+ *   var(--wp--preset--spacing--lg)                   → spacing/lg
+ *   var(--wp--custom--body--typography--font-family) → body/typography/fontFamily
+ *   var(--theme--type--weight--bold)                 → type/weight/bold
+ *   var(--token--color--orange-50v)                  → color/orange-50v
+ */
+export function cssVarToDisplayName(cssVar: string): string {
+	const m = cssVar.match(/^var\((--[^)]+)\)$/);
+	if (!m) return cssVar;
+	const token = m[1];
+
+	// --wp--preset--color--{slug}
+	const colorM = token.match(/^--wp--preset--color--(.+)$/);
+	if (colorM) return `palette/${colorM[1]}`;
+
+	// --wp--preset--font-family--{slug}
+	const ffM = token.match(/^--wp--preset--font-family--(.+)$/);
+	if (ffM) return `typography/fontFamilies/${ffM[1]}`;
+
+	// --wp--preset--font-size--{slug}
+	const fsM = token.match(/^--wp--preset--font-size--(.+)$/);
+	if (fsM) return `font-size/${fsM[1]}`;
+
+	// --wp--preset--spacing--{slug}
+	const spM = token.match(/^--wp--preset--spacing--(.+)$/);
+	if (spM) return `spacing/${spM[1]}`;
+
+	// --wp--preset--border-radius--{slug}
+	const brM = token.match(/^--wp--preset--border-radius--(.+)$/);
+	if (brM) return `border/radius-sizes/${brM[1]}`;
+
+	// --wp--custom--{path}: split on '--', convert each kebab segment to camelCase, join with '/'
+	// e.g. body--typography--font-family → body/typography/fontFamily
+	const customM = token.match(/^--wp--custom--(.+)$/);
+	if (customM) {
+		const parts = customM[1].split('--');
+		return parts.map(p => p.replace(/-([a-z])/g, (_, c: string) => c.toUpperCase())).join('/');
+	}
+
+	// --theme--{path}: replace '--' with '/'
+	const themeM = token.match(/^--theme--(.+)$/);
+	if (themeM) return themeM[1].replace(/--/g, '/');
+
+	// --token--{category}--{rest}: replace '--' with '/'
+	const tokenM = token.match(/^--token--(.+)$/);
+	if (tokenM) return tokenM[1].replace(/--/g, '/');
+
+	// Generic fallback: strip leading '--' and replace '--' separators with '/'
+	return token.replace(/^--/, '').replace(/--/g, '/');
+}
+
 // --- Diff helpers ---
 
 /** Convert an incoming ImportModeValue to a display string. */
@@ -464,7 +528,10 @@ export async function diffImportEntries(entries: ImportEntry[]): Promise<DiffRes
 					const v = await figma.variables.getVariableByIdAsync(targetId);
 					if (v) return { text: v.name, isAlias: true };
 				}
-				return { text: value.cssVar, isAlias: true }; // fallback: show CSS var
+				// Fallback: infer variable name from the CSS var string so the preview
+				// shows a useful path (e.g. "palette/primary") even before the target
+				// variable has been created in Figma.
+				return { text: cssVarToDisplayName(value.cssVar), isAlias: true };
 			}
 			return { text: importValueToDisplay(value, effectiveResolvedType, modeName), isAlias: false };
 		};

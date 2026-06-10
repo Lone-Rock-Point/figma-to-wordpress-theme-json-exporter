@@ -8,6 +8,7 @@ import {
 	parseCustomValue,
 	parseThemeJson,
 	writeImportEntries,
+	cssVarToDisplayName,
 	type ImportEntry,
 	type VarAliasRef,
 } from './index';
@@ -182,6 +183,57 @@ describe('parseCustomValue', () => {
 		});
 		expect(parseCustomValue('bold')).toEqual({ resolvedType: 'STRING', parsedValue: 'bold' });
 		expect(parseCustomValue('#ff0000')).toEqual({ resolvedType: 'STRING', parsedValue: '#ff0000' });
+	});
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// cssVarToDisplayName
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('cssVarToDisplayName', () => {
+	it('maps preset color vars to palette/{slug}', () => {
+		expect(cssVarToDisplayName('var(--wp--preset--color--primary)')).toBe('palette/primary');
+		expect(cssVarToDisplayName('var(--wp--preset--color--primary-lighter)')).toBe('palette/primary-lighter');
+		expect(cssVarToDisplayName('var(--wp--preset--color--base-minus-1)')).toBe('palette/base-minus-1');
+	});
+
+	it('maps preset font-family vars to typography/fontFamilies/{slug}', () => {
+		expect(cssVarToDisplayName('var(--wp--preset--font-family--montserrat)')).toBe('typography/fontFamilies/montserrat');
+		expect(cssVarToDisplayName('var(--wp--preset--font-family--open-sans)')).toBe('typography/fontFamilies/open-sans');
+	});
+
+	it('maps preset font-size vars to font-size/{slug}', () => {
+		expect(cssVarToDisplayName('var(--wp--preset--font-size--x-large)')).toBe('font-size/x-large');
+		expect(cssVarToDisplayName('var(--wp--preset--font-size--normal)')).toBe('font-size/normal');
+	});
+
+	it('maps preset spacing vars to spacing/{slug}', () => {
+		expect(cssVarToDisplayName('var(--wp--preset--spacing--lg)')).toBe('spacing/lg');
+	});
+
+	it('maps preset border-radius vars to border/radius-sizes/{slug}', () => {
+		expect(cssVarToDisplayName('var(--wp--preset--border-radius--sm)')).toBe('border/radius-sizes/sm');
+	});
+
+	it('maps custom vars to camelCase paths', () => {
+		expect(cssVarToDisplayName('var(--wp--custom--body--typography--font-family)')).toBe('body/typography/fontFamily');
+		expect(cssVarToDisplayName('var(--wp--custom--heading--typography--font-weight)')).toBe('heading/typography/fontWeight');
+		expect(cssVarToDisplayName('var(--wp--custom--color--interactive)')).toBe('color/interactive');
+	});
+
+	it('maps theme vars to slash paths', () => {
+		expect(cssVarToDisplayName('var(--theme--type--weight--bold)')).toBe('type/weight/bold');
+		expect(cssVarToDisplayName('var(--theme--type--weight--regular)')).toBe('type/weight/regular');
+	});
+
+	it('maps token vars to slash paths', () => {
+		expect(cssVarToDisplayName('var(--token--color--orange-50v)')).toBe('color/orange-50v');
+		expect(cssVarToDisplayName('var(--token--color--blue-10v)')).toBe('color/blue-10v');
+	});
+
+	it('returns the input unchanged for non-var strings', () => {
+		expect(cssVarToDisplayName('bold')).toBe('bold');
+		expect(cssVarToDisplayName('#ff0000')).toBe('#ff0000');
 	});
 });
 
