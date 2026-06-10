@@ -697,11 +697,28 @@ async function resolveVarRef(
 	return null;
 }
 
+/**
+ * Infer a Figma variable type from a CSS var string without needing the target
+ * variable to exist yet. Used in Pass 1 of writeImportEntries when the alias
+ * target hasn't been created yet and we still need to choose a type.
+ */
+function cssVarToInferredType(cssVar: string): 'COLOR' | 'FLOAT' | 'STRING' {
+	const m = cssVar.match(/^var\((--[^)]+)\)$/);
+	if (!m) return 'STRING';
+	const token = m[1];
+	if (/^--wp--preset--color--/.test(token)) return 'COLOR';
+	if (/^--wp--preset--font-size--/.test(token)) return 'FLOAT';
+	if (/^--wp--preset--spacing--/.test(token)) return 'FLOAT';
+	if (/^--wp--preset--border-radius--/.test(token)) return 'FLOAT';
+	return 'STRING';
+}
+
 export async function writeImportEntries(entries: ImportEntry[]): Promise<WriteResult> {
+	// Snapshot of pre-existing collections — used only for preExistingModeIds tracking
+	// so we never overwrite values in modes that existed before this import started.
 	const existingCollections = await figma.variables.getLocalVariableCollectionsAsync();
 	const collectionByName = new Map<string, any>();
 	for (const col of existingCollections) {
-		// Trim + lowercase to match export convention and handle minor whitespace differences
 		collectionByName.set(col.name.toLowerCase().trim(), col);
 	}
 
@@ -710,9 +727,20 @@ export async function writeImportEntries(entries: ImportEntry[]): Promise<WriteR
 	let skipped = 0;
 	const warnings: string[] = [];
 
-	// Lazy lookup cache for VarAliasRef resolution: collection ID → (cssVar → variableId)
-	// Shared across all collections so the same source collection is only fetched once.
+	// Shared alias lookup cache. Local collection entries (keyed by collection ID)
+	// are cleared between collection iterations so stale data isn't used after new
+	// variables are created. Team library entries (keyed "lib:*") are stable and
+	// survive across iterations.
 	const varLookupCache = new Map<string, Map<string, string>>();
+
+	// Deferred aliases: entries whose alias target couldn't be resolved in Pass 1
+	// because the target variable hadn't been created yet. Retried in Pass 2.
+	const pendingAliases: Array<{
+		variable: any;
+		modeId: string;
+		cssVar: string;
+		entryName: string;
+	}> = [];
 
 	// Group entries by collection
 	const byCollection = new Map<string, ImportEntry[]>();
@@ -721,6 +749,13 @@ export async function writeImportEntries(entries: ImportEntry[]): Promise<WriteR
 		if (!byCollection.has(key)) byCollection.set(key, []);
 		byCollection.get(key)!.push(entry);
 	}
+
+	// ─── Pass 1: create / update all variables ────────────────────────────────
+	// Alias targets that can be resolved immediately (e.g. a color palette variable
+	// written in an earlier collection iteration) are set right away. Targets that
+	// can't be resolved yet — because they're in the same collection or a later one
+	// — are deferred: the variable is created with the correct inferred type and a
+	// safe default value, and the alias is queued for Pass 2.
 
 	for (const [collectionName, collectionEntries] of byCollection) {
 		// --- Get or create collection ---
@@ -739,7 +774,6 @@ export async function writeImportEntries(entries: ImportEntry[]): Promise<WriteR
 			}
 		}
 
-		// Build current mode map (lowercase name → modeId)
 		const refreshModeMap = () =>
 			new Map<string, string>(collection.modes.map((m: any) => [m.name.toLowerCase(), m.modeId]));
 
@@ -748,10 +782,9 @@ export async function writeImportEntries(entries: ImportEntry[]): Promise<WriteR
 		for (const modeName of requiredModeNames) {
 			if (!modeMap.has(modeName.toLowerCase())) {
 				if (isNewCollection && modeMap.size === 1) {
-					// Rename the default "Mode 1" rather than adding a new one
 					const [firstModeId] = modeMap.values();
 					collection.renameMode(firstModeId, modeName);
-					isNewCollection = false; // only rename once
+					isNewCollection = false;
 				} else {
 					collection.addMode(modeName);
 				}
@@ -759,15 +792,13 @@ export async function writeImportEntries(entries: ImportEntry[]): Promise<WriteR
 			}
 		}
 
-		// If collection was just created and still has the original "Mode 1" name
-		// (happens when no modes were added), rename it to Default
 		if (modeMap.has('mode 1')) {
 			const modeId = modeMap.get('mode 1')!;
 			collection.renameMode(modeId, DEFAULT_MODE_NAME);
 			modeMap = refreshModeMap();
 		}
 
-		// --- Build existing variable map in parallel (name → variable) ---
+		// --- Build existing variable map ---
 		const fetchedVars = await Promise.all(
 			collection.variableIds.map((id: string) => figma.variables.getVariableByIdAsync(id))
 		);
@@ -776,52 +807,71 @@ export async function writeImportEntries(entries: ImportEntry[]): Promise<WriteR
 			if (v) existingVars.set(v.name, v);
 		}
 
-		// Track which mode IDs existed before this import (used to decide default-fill scope)
+		// Track pre-import mode IDs so we never overwrite values in existing modes.
 		const preExistingModeIds = new Set(
 			existingCollections
 				.find((c: any) => c.id === collection.id)
 				?.modes.map((m: any) => m.modeId) ?? []
 		);
 
+		// Refresh the local-collection alias lookup — previous collection iterations
+		// in this run have written new variables that are now queryable.
+		const localCollections = await figma.variables.getLocalVariableCollectionsAsync();
+		for (const key of varLookupCache.keys()) {
+			if (!key.startsWith('lib:')) varLookupCache.delete(key);
+		}
+
 		// --- Create or update each variable ---
 		for (const entry of collectionEntries) {
-			// Pre-resolve all VarAliasRef values BEFORE touching Figma so we never
-			// create a variable we can't fully populate. If any alias target is missing
-			// (library not enabled, collection not present), skip the entire entry.
 			const resolvedModes: Record<string, any> = {};
-			let hasUnresolvableAlias = false;
-			// When a var() reference resolves to a target variable, the TARGET's type is
-			// authoritative — e.g. flattenToEntries emits STRING for all var() values but
-			// styles/color/text should actually be COLOR because its target is a COLOR variable.
+			// Aliases deferred to Pass 2: only used for --wp--* vars that reference
+			// variables being created in this same import batch.
+			const deferredModes: Array<{ modeName: string; modeId: string; cssVar: string }> = [];
+
+			// Effective type: determined by the alias target when resolvable, or inferred
+			// from the CSS var pattern, or falls back to the parsed entry type.
 			let effectiveResolvedType: 'COLOR' | 'FLOAT' | 'STRING' = entry.resolvedType;
+			let hasHardAlias = false; // true when an external alias can't be resolved → skip entry
 
 			for (const [modeName, value] of Object.entries(entry.modes)) {
 				if (isVarAliasRef(value)) {
-					const targetId = await resolveVarRef(value.cssVar, existingCollections, varLookupCache);
-					if (!targetId) {
-						warnings.push(
-							`Skipping "${entry.variableName}" — could not resolve "${value.cssVar}". ` +
-							`Enable the library that contains this variable in your Figma file, then re-import.`
-						);
-						hasUnresolvableAlias = true;
-						break;
-					} else {
-						// Use the target variable's type — it is the source of truth for what type
-						// this variable should be (e.g. var(--wp--preset--color--primary) → COLOR).
+					const targetId = await resolveVarRef(value.cssVar, localCollections, varLookupCache);
+					if (targetId) {
+						// Target exists — resolve type from it and set alias immediately.
 						const targetVar = await figma.variables.getVariableByIdAsync(targetId);
 						if (targetVar) {
 							effectiveResolvedType = targetVar.resolvedType as 'COLOR' | 'FLOAT' | 'STRING';
 						}
 						resolvedModes[modeName] = { type: 'VARIABLE_ALIAS', id: targetId };
+					} else if (/^var\(--wp--/.test(value.cssVar)) {
+						// WordPress-namespace variable not found yet — it may be created later
+						// in this same import batch. Defer to Pass 2.
+						const inferredType = cssVarToInferredType(value.cssVar);
+						if (effectiveResolvedType === entry.resolvedType) {
+							effectiveResolvedType = inferredType;
+						}
+						const modeId = modeMap.get(modeName.toLowerCase());
+						if (modeId) {
+							deferredModes.push({ modeName, modeId, cssVar: value.cssVar });
+						} else {
+							warnings.push(`Mode "${modeName}" not found in collection "${collectionName}" for variable "${entry.variableName}".`);
+						}
+					} else {
+						// External library variable (--token--, --theme--, etc.) not found.
+						// Skip the entry — don't create an orphaned variable.
+						warnings.push(
+							`Skipping "${entry.variableName}" — could not resolve "${value.cssVar}". ` +
+							`Enable the library that contains this variable in your Figma file, then re-import.`
+						);
+						hasHardAlias = true;
+						break;
 					}
 				} else {
 					resolvedModes[modeName] = value;
 				}
 			}
-			if (hasUnresolvableAlias) {
-				skipped++;
-				continue;
-			}
+
+			if (hasHardAlias) { skipped++; continue; }
 
 			let variable = existingVars.get(entry.variableName);
 			const isNew = !variable;
@@ -840,7 +890,7 @@ export async function writeImportEntries(entries: ImportEntry[]): Promise<WriteR
 				continue;
 			}
 
-			// Set value for each mode explicitly provided by the import
+			// Set immediately-resolved values
 			let anySet = false;
 			for (const [modeName, setVal] of Object.entries(resolvedModes)) {
 				const modeId = modeMap.get(modeName.toLowerCase());
@@ -856,36 +906,77 @@ export async function writeImportEntries(entries: ImportEntry[]): Promise<WriteR
 				}
 			}
 
-			// For NEW variables only: fill newly-added modes with safe defaults so Figma's
-			// all-modes requirement is satisfied. Never fill defaults for existing variables
-			// to avoid overwriting values the user hasn't asked to change.
-			const providedModeNames = new Set(Object.keys(resolvedModes).map(m => m.toLowerCase()));
+			// For deferred modes: write a safe default value now so the variable is
+			// fully populated, then queue the alias for Pass 2 to overwrite.
+			for (const { modeId, cssVar } of deferredModes) {
+				try {
+					variable.setValueForMode(modeId, defaultValue(effectiveResolvedType));
+					anySet = true;
+				} catch (_) {}
+				pendingAliases.push({ variable, modeId, cssVar, entryName: entry.variableName });
+			}
+
+			// Fill defaults for any modes not covered by this entry (new variables only,
+			// or newly-added modes for existing variables — never overwrite existing values).
+			const providedModeNames = new Set([
+				...Object.keys(resolvedModes).map(m => m.toLowerCase()),
+				...deferredModes.map(d => d.modeName.toLowerCase()),
+			]);
 			if (isNew) {
 				for (const [lowerName, modeId] of modeMap) {
 					if (!providedModeNames.has(lowerName)) {
 						try {
-							variable.setValueForMode(modeId, defaultValue(entry.resolvedType));
-						} catch (_) {
-							// best-effort; don't warn for default fills
-						}
+							variable.setValueForMode(modeId, defaultValue(effectiveResolvedType));
+						} catch (_) {}
 					}
 				}
 			} else {
-				// For existing variables: only fill defaults for modes that were newly added
-				// during this import run (i.e. didn't exist before we started).
 				for (const [lowerName, modeId] of modeMap) {
-					if (preExistingModeIds.has(modeId)) continue; // mode existed before — don't touch
+					if (preExistingModeIds.has(modeId)) continue;
 					if (!providedModeNames.has(lowerName)) {
 						try {
-							variable.setValueForMode(modeId, defaultValue(entry.resolvedType));
-						} catch (_) {
-							// best-effort
-						}
+							variable.setValueForMode(modeId, defaultValue(effectiveResolvedType));
+						} catch (_) {}
 					}
 				}
 			}
 
 			if (isNew) { created++; } else if (anySet) { updated++; }
+		}
+	}
+
+	// ─── Pass 2: resolve deferred aliases ─────────────────────────────────────
+	// All variables have been created by now. Re-fetch local collections so every
+	// variable created in Pass 1 is visible, then set each pending alias value.
+
+	if (pendingAliases.length > 0) {
+		const freshLocalCollections = await figma.variables.getLocalVariableCollectionsAsync();
+		for (const key of varLookupCache.keys()) {
+			if (!key.startsWith('lib:')) varLookupCache.delete(key);
+		}
+
+		for (const { variable, modeId, cssVar, entryName } of pendingAliases) {
+			const targetId = await resolveVarRef(cssVar, freshLocalCollections, varLookupCache);
+			if (!targetId) {
+				warnings.push(
+					`Could not resolve alias for "${entryName}" — "${cssVar}" was not found. ` +
+					`Enable the library that contains this variable in your Figma file, then re-import.`
+				);
+				continue;
+			}
+			const targetVar = await figma.variables.getVariableByIdAsync(targetId);
+			if (targetVar && targetVar.resolvedType !== variable.resolvedType) {
+				warnings.push(
+					`Type mismatch for "${entryName}": variable is ${variable.resolvedType} ` +
+					`but alias target "${cssVar}" is ${targetVar.resolvedType}.`
+				);
+				continue;
+			}
+			try {
+				variable.setValueForMode(modeId, { type: 'VARIABLE_ALIAS', id: targetId });
+			} catch (err) {
+				warnings.push(`Could not set alias for "${entryName}": ${err instanceof Error ? err.message : String(err)}`);
+			}
 		}
 	}
 

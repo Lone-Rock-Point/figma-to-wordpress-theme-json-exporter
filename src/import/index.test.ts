@@ -778,11 +778,17 @@ describe('writeImportEntries', () => {
 		expect(result).toMatchObject({ created: 1, updated: 0, skipped: 0, warnings: [] });
 	});
 
-	it('skips a STRING VarAliasRef variable when its target cannot be resolved', async () => {
+	it('creates a --wp-- VarAliasRef variable with a default value when target not yet available', async () => {
+		// --wp-- vars are deferred to Pass 2 because the target may be created in the same
+		// import batch. If still unresolvable after Pass 2, the variable is created with a
+		// default value and a warning is emitted (rather than skipping entirely).
 		const stylesCollection = makeCollection({ variableIds: [] });
 
 		mockFigma.variables.getLocalVariableCollectionsAsync.mockResolvedValue([stylesCollection]);
 		mockFigma.teamLibrary.getAvailableLibraryVariableCollectionsAsync.mockResolvedValue([]);
+
+		const newVar = makeVariable({ name: 'typography/fontFamily', resolvedType: 'STRING' });
+		mockFigma.variables.createVariable.mockReturnValue(newVar);
 
 		const aliasEntry: ImportEntry = {
 			collection: 'styles',
@@ -793,9 +799,67 @@ describe('writeImportEntries', () => {
 
 		const result = await writeImportEntries([aliasEntry]);
 
-		expect(mockFigma.variables.createVariable).not.toHaveBeenCalled();
-		expect(result).toMatchObject({ created: 0, updated: 0, skipped: 1 });
-		expect(result.warnings.some(w => w.includes('Skipping') && w.includes('could not resolve'))).toBe(true);
+		// Variable IS created (with default value) since it's a --wp-- reference
+		expect(mockFigma.variables.createVariable).toHaveBeenCalledWith('typography/fontFamily', expect.anything(), 'STRING');
+		expect(result).toMatchObject({ created: 1, updated: 0, skipped: 0 });
+		expect(result.warnings.some(w => w.includes('Could not resolve alias'))).toBe(true);
+	});
+
+	it('resolves a --wp-- VarAliasRef alias in Pass 2 when target is created in the same batch', async () => {
+		// Simulates importing settings [custom]/body/typography/fontFamily → var(--wp--preset--font-family--montserrat)
+		// where settings [custom]/typography/fontFamilies/montserrat is also being imported.
+		// Pass 1: fontFamilies/montserrat is created first (concrete STRING value).
+		// Pass 2: body/typography/fontFamily finds the just-created target and sets the alias.
+
+		const customCollection = makeCollection({ name: 'settings [custom]', variableIds: [] });
+
+		// Pass 1: getLocalVariableCollectionsAsync returns empty collection
+		// Pass 2 (per-collection refresh + final refresh): returns collection with the new var
+		const montserratVar = makeVariable({ name: 'typography/fontFamilies/montserrat', resolvedType: 'STRING', id: 'montserrat-id' });
+		const bodyVar = makeVariable({ name: 'body/typography/fontFamily', resolvedType: 'STRING', id: 'body-ff-id' });
+		const populatedCollection = { ...customCollection, variableIds: ['montserrat-id'] };
+
+		let callCount = 0;
+		mockFigma.variables.getLocalVariableCollectionsAsync.mockImplementation(() => {
+			callCount++;
+			// First call (initial snapshot) and second call (per-collection refresh in Pass 1):
+			// still empty. Third call (Pass 2 refresh): montserrat exists.
+			return Promise.resolve(callCount <= 2 ? [customCollection] : [populatedCollection]);
+		});
+		mockFigma.variables.getVariableByIdAsync.mockImplementation((id: string) =>
+			Promise.resolve(id === 'montserrat-id' ? montserratVar : null)
+		);
+		mockFigma.teamLibrary.getAvailableLibraryVariableCollectionsAsync.mockResolvedValue([]);
+
+		let createCount = 0;
+		mockFigma.variables.createVariable.mockImplementation((_name: string, _col: any, type: string) => {
+			createCount++;
+			return createCount === 1
+				? montserratVar  // typography/fontFamilies/montserrat (created first, concrete value)
+				: bodyVar;       // body/typography/fontFamily (created second, deferred alias)
+		});
+
+		const concreteEntry: ImportEntry = {
+			collection: 'settings [custom]',
+			variableName: 'typography/fontFamilies/montserrat',
+			resolvedType: 'STRING',
+			modes: { Default: 'Montserrat, sans-serif' },
+		};
+		const aliasEntry: ImportEntry = {
+			collection: 'settings [custom]',
+			variableName: 'body/typography/fontFamily',
+			resolvedType: 'STRING',
+			modes: { Default: { type: 'VAR_ALIAS', cssVar: 'var(--wp--preset--font-family--montserrat)' } as VarAliasRef },
+		};
+
+		const result = await writeImportEntries([concreteEntry, aliasEntry]);
+
+		expect(result).toMatchObject({ created: 2, updated: 0, skipped: 0, warnings: [] });
+		// Pass 2 should have set the alias on body/typography/fontFamily
+		expect(bodyVar.setValueForMode).toHaveBeenCalledWith(
+			expect.any(String),
+			{ type: 'VARIABLE_ALIAS', id: 'montserrat-id' }
+		);
 	});
 
 	it('uses the target variable type when creating a STRING VarAliasRef that resolves to a COLOR variable', async () => {
