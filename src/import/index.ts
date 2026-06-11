@@ -308,6 +308,29 @@ export function parseThemeJson(theme: any): ParseResult {
 		}
 	}
 
+	// --- settings [static]: font families (from settings.typography.fontFamilies) ---
+	// WordPress stores font family presets in settings.typography.fontFamilies.
+	// These go into settings [static] so that transformTokenReference maps them to
+	// var(--wp--preset--font-family--{slug}), matching how styles/custom entries
+	// reference them via VarAliasRef.
+	const fontFamilies = theme.settings?.typography?.fontFamilies;
+	if (Array.isArray(fontFamilies)) {
+		for (const item of fontFamilies) {
+			if (!item.slug || typeof item.slug !== 'string') {
+				warnings.push(`settings [static]: Skipping font family entry — missing or invalid slug.`);
+				continue;
+			}
+			if (typeof item.fontFamily === 'string') {
+				entries.push({
+					collection: 'settings [static]',
+					variableName: `typography/fontFamilies/${item.slug}`,
+					resolvedType: 'STRING',
+					modes: { Default: item.fontFamily },
+				});
+			}
+		}
+	}
+
 	// --- settings [custom] ---
 	const custom = theme.settings?.custom;
 	if (custom && typeof custom === 'object' && !Array.isArray(custom)) {
@@ -750,6 +773,71 @@ export async function writeImportEntries(entries: ImportEntry[]): Promise<WriteR
 		byCollection.get(key)!.push(entry);
 	}
 
+	// ─── Pre-pass: create !-theme-tokens stubs ────────────────────────────────
+	// If any entry references a var(--theme--...) that can't be resolved from a
+	// connected team library, create a local stub STRING variable in a
+	// !-theme-tokens collection so that the alias chain survives import. The user
+	// can fill in concrete values later (or connect the library and re-import).
+	{
+		const themeVarNames = new Map<string, string>(); // cssVar → varName
+		for (const entry of entries) {
+			for (const value of Object.values(entry.modes)) {
+				if (isVarAliasRef(value)) {
+					const m = value.cssVar.match(/^var\((--theme--[^)]+)\)$/);
+					if (m) {
+						const token = m[1]; // e.g. --theme--type--weight--regular
+						// Convert to variable path: --theme--type--weight--regular → theme/type/weight/regular
+						const varName = token.replace(/^--/, '').replace(/--/g, '/');
+						themeVarNames.set(value.cssVar, varName);
+					}
+				}
+			}
+		}
+
+		if (themeVarNames.size > 0) {
+			const initLocalCollections = await figma.variables.getLocalVariableCollectionsAsync();
+			const unresolvable: Array<[string, string]> = [];
+			for (const [cssVar, varName] of themeVarNames) {
+				const targetId = await resolveVarRef(cssVar, initLocalCollections, varLookupCache);
+				if (!targetId) unresolvable.push([cssVar, varName]);
+			}
+
+			if (unresolvable.length > 0) {
+				const THEME_COLLECTION = '!-theme-tokens';
+				let themeCollection = collectionByName.get(THEME_COLLECTION);
+				if (!themeCollection) {
+					themeCollection = figma.variables.createVariableCollection(THEME_COLLECTION);
+					const firstModeId = themeCollection.modes[0]?.modeId;
+					if (firstModeId) themeCollection.renameMode(firstModeId, DEFAULT_MODE_NAME);
+					collectionByName.set(THEME_COLLECTION, themeCollection);
+				}
+
+				const existingThemeVarIds: string[] = themeCollection.variableIds ?? [];
+				const existingThemeVarNames = new Set<string>();
+				for (const id of existingThemeVarIds) {
+					const v = await figma.variables.getVariableByIdAsync(id);
+					if (v) existingThemeVarNames.add(v.name);
+				}
+
+				for (const [, varName] of unresolvable) {
+					if (!existingThemeVarNames.has(varName)) {
+						try {
+							figma.variables.createVariable(varName, themeCollection, 'STRING');
+							created++;
+						} catch (err) {
+							warnings.push(`Could not create stub "${varName}" in ${THEME_COLLECTION}: ${err instanceof Error ? err.message : String(err)}`);
+						}
+					}
+				}
+
+				// Clear local lookup cache so Pass 1 can resolve the new stubs
+				for (const key of varLookupCache.keys()) {
+					if (!key.startsWith('lib:')) varLookupCache.delete(key);
+				}
+			}
+		}
+	}
+
 	// ─── Pass 1: create / update all variables ────────────────────────────────
 	// Alias targets that can be resolved immediately (e.g. a color palette variable
 	// written in an earlier collection iteration) are set right away. Targets that
@@ -856,15 +944,31 @@ export async function writeImportEntries(entries: ImportEntry[]): Promise<WriteR
 						} else {
 							warnings.push(`Mode "${modeName}" not found in collection "${collectionName}" for variable "${entry.variableName}".`);
 						}
-					} else {
-						// External library variable (--token--, --theme--, etc.) not found.
-						// Skip the entry — don't create an orphaned variable.
+					} else if (collectionName.toLowerCase().trim() === 'settings [color]') {
+						// Color palette entry: skip — don't create an orphaned color swatch
+						// with a wrong default color when the library isn't enabled.
 						warnings.push(
 							`Skipping "${entry.variableName}" — could not resolve "${value.cssVar}". ` +
 							`Enable the library that contains this variable in your Figma file, then re-import.`
 						);
 						hasHardAlias = true;
 						break;
+					} else {
+						// Non-palette entry (settings [custom], styles, etc.): defer even for
+						// external library refs (--theme--, --token--). The variable must exist
+						// so that other variables can alias it — an empty default value is better
+						// than a missing variable. If Pass 2 also can't resolve it, a warning is
+						// emitted and the variable stays with its default value.
+						const inferredType = cssVarToInferredType(value.cssVar);
+						if (effectiveResolvedType === entry.resolvedType) {
+							effectiveResolvedType = inferredType;
+						}
+						const modeId = modeMap.get(modeName.toLowerCase());
+						if (modeId) {
+							deferredModes.push({ modeName, modeId, cssVar: value.cssVar });
+						} else {
+							warnings.push(`Mode "${modeName}" not found in collection "${collectionName}" for variable "${entry.variableName}".`);
+						}
 					}
 				} else {
 					resolvedModes[modeName] = value;

@@ -63,6 +63,9 @@ export function transformTokenReference(collectionName: string, varName: string)
 		if (category === 'border' && group === 'radius-sizes') {
 			return `var(--wp--preset--border-radius--${slug})`;
 		}
+		if (isFontFamilyPath(parts)) {
+			return `var(--wp--preset--font-family--${slug})`;
+		}
 	}
 
 	if (col === 'settings [custom]') {

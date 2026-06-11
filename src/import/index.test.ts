@@ -495,13 +495,56 @@ describe('parseThemeJson', () => {
 
 	// --- Combined ---
 
+	it('parses settings.typography.fontFamilies into settings [static] entries', () => {
+		const { entries, warnings } = parseThemeJson({
+			settings: {
+				typography: {
+					fontFamilies: [
+						{ slug: 'montserrat', name: 'Montserrat', fontFamily: 'Montserrat, sans-serif' },
+						{ slug: 'open-sans', name: 'Open Sans', fontFamily: 'Open Sans, sans-serif' },
+					],
+				},
+			},
+		});
+		expect(warnings).toHaveLength(0);
+		expect(entries).toHaveLength(2);
+		expect(entries[0]).toMatchObject({
+			collection: 'settings [static]',
+			variableName: 'typography/fontFamilies/montserrat',
+			resolvedType: 'STRING',
+			modes: { Default: 'Montserrat, sans-serif' },
+		});
+		expect(entries[1]).toMatchObject({
+			collection: 'settings [static]',
+			variableName: 'typography/fontFamilies/open-sans',
+			resolvedType: 'STRING',
+			modes: { Default: 'Open Sans, sans-serif' },
+		});
+	});
+
+	it('skips font family entries with missing fontFamily value', () => {
+		const { entries } = parseThemeJson({
+			settings: {
+				typography: {
+					fontFamilies: [
+						{ slug: 'montserrat', name: 'Montserrat' }, // no fontFamily field
+					],
+				},
+			},
+		});
+		expect(entries).toHaveLength(0);
+	});
+
 	it('handles a full theme.json with multiple sections', () => {
 		const { entries, warnings } = parseThemeJson({
 			$schema: 'https://schemas.wp.org/trunk/theme.json',
 			version: 3,
 			settings: {
 				color: { palette: [{ slug: 'primary', color: '#ff0000' }] },
-				typography: { fontSizes: [{ slug: 'xl', size: '36px', fluid: { min: '24px', max: '36px' } }] },
+				typography: {
+					fontSizes: [{ slug: 'xl', size: '36px', fluid: { min: '24px', max: '36px' } }],
+					fontFamilies: [{ slug: 'montserrat', name: 'Montserrat', fontFamily: 'Montserrat, sans-serif' }],
+				},
 				spacing: { spacingSizes: [{ slug: '4', size: 'min(2rem, 4vw)' }] },
 				border: { radiusSizes: [{ slug: 'sm', size: '4px' }] },
 				custom: { gap: '16px' },
@@ -509,13 +552,16 @@ describe('parseThemeJson', () => {
 			styles: { color: { text: 'var(--wp--preset--color--primary)' } },
 		});
 		expect(warnings).toHaveLength(0);
-		expect(entries).toHaveLength(6);
+		expect(entries).toHaveLength(7); // +1 for font family
 		const collections = [...new Set(entries.map(e => e.collection))];
 		expect(collections).toContain('settings [color]');
 		expect(collections).toContain('settings [fluid]');
 		expect(collections).toContain('settings [static]');
 		expect(collections).toContain('settings [custom]');
 		expect(collections).toContain('styles');
+		// Font family entry lands in settings [static]
+		expect(entries.filter(e => e.collection === 'settings [static]').map(e => e.variableName))
+			.toContain('typography/fontFamilies/montserrat');
 	});
 
 	// --- slug validation ---
@@ -897,7 +943,7 @@ describe('writeImportEntries', () => {
 		expect(result).toMatchObject({ created: 1, updated: 0, skipped: 0, warnings: [] });
 	});
 
-	it('skips (does not create) a variable when its VarAliasRef target cannot be found', async () => {
+	it('skips (does not create) a variable when its VarAliasRef target cannot be found in settings [color]', async () => {
 		const colorCollection = makeCollection({ variableIds: [] });
 
 		// No USWDS collection anywhere — library returns empty
@@ -913,10 +959,70 @@ describe('writeImportEntries', () => {
 
 		const result = await writeImportEntries([aliasEntry]);
 
-		// Variable must NOT be created — no orphaned variable with an unresolved alias
+		// Variable must NOT be created — no orphaned color swatch with wrong default
 		expect(mockFigma.variables.createVariable).not.toHaveBeenCalled();
 		expect(result).toMatchObject({ created: 0, updated: 0, skipped: 1 });
 		expect(result.warnings.some(w => w.includes('Skipping') && w.includes('could not resolve'))).toBe(true);
 		expect(result.warnings.some(w => w.includes('Enable the library'))).toBe(true);
+	});
+
+	it('creates a !-theme-tokens stub when a --theme-- VarAliasRef cannot be resolved from a library', async () => {
+		// settings [custom]/body/typography/fontWeight = var(--theme--type--weight--regular)
+		// The theme library isn't connected. The plugin should create:
+		//   !-theme-tokens/theme/type/weight/regular  (STRING stub, value '')
+		// so that body/typography/fontWeight can alias it in Pass 1.
+
+		const STUB_ID = 'stub-theme-var-id';
+
+		const customCollection = makeCollection({ id: 'col-custom', name: 'settings [custom]', variableIds: [] });
+
+		// Two snapshots of the !-theme-tokens collection:
+		// - themeCollectionNew: returned by createVariableCollection (no variables yet)
+		// - themeCollectionWithStub: returned by getLocalVariableCollectionsAsync in Pass 1 (stub exists)
+		const themeCollectionNew = makeCollection({ id: 'col-theme', name: '!-theme-tokens', variableIds: [] });
+		const themeCollectionWithStub = makeCollection({ id: 'col-theme', name: '!-theme-tokens', variableIds: [STUB_ID] });
+
+		const stubVar = makeVariable({ id: STUB_ID, name: 'theme/type/weight/regular', resolvedType: 'STRING' });
+		const fontWeightVar = makeVariable({ name: 'body/typography/fontWeight', resolvedType: 'STRING' });
+
+		mockFigma.variables.createVariableCollection.mockReturnValue(themeCollectionNew);
+		mockFigma.variables.createVariable
+			.mockReturnValueOnce(stubVar)        // pre-pass: !-theme-tokens/theme/type/weight/regular
+			.mockReturnValueOnce(fontWeightVar); // Pass 1: settings [custom]/body/typography/fontWeight
+
+		mockFigma.variables.getLocalVariableCollectionsAsync
+			.mockResolvedValueOnce([customCollection])               // call 1: existingCollections snapshot
+			.mockResolvedValueOnce([customCollection])               // call 2: pre-pass resolve check (stub not yet created)
+			.mockResolvedValue([customCollection, themeCollectionWithStub]); // call 3+: Pass 1 (stub now exists)
+
+		mockFigma.teamLibrary.getAvailableLibraryVariableCollectionsAsync.mockResolvedValue([]);
+
+		mockFigma.variables.getVariableByIdAsync.mockImplementation(async (id: string) => {
+			if (id === STUB_ID) return stubVar;
+			return null;
+		});
+
+		const aliasEntry: ImportEntry = {
+			collection: 'settings [custom]',
+			variableName: 'body/typography/fontWeight',
+			resolvedType: 'STRING',
+			modes: { Default: { type: 'VAR_ALIAS', cssVar: 'var(--theme--type--weight--regular)' } as VarAliasRef },
+		};
+
+		const result = await writeImportEntries([aliasEntry]);
+
+		// !-theme-tokens collection created
+		expect(mockFigma.variables.createVariableCollection).toHaveBeenCalledWith('!-theme-tokens');
+		// Stub IS created in !-theme-tokens
+		expect(mockFigma.variables.createVariable).toHaveBeenCalledWith(
+			'theme/type/weight/regular', expect.anything(), 'STRING'
+		);
+		// fontWeight variable IS created and aliases the stub
+		expect(mockFigma.variables.createVariable).toHaveBeenCalledWith(
+			'body/typography/fontWeight', expect.anything(), 'STRING'
+		);
+		// 2 created: the stub + the fontWeight variable; no warnings
+		expect(result).toMatchObject({ created: 2, skipped: 0 });
+		expect(result.warnings).toHaveLength(0);
 	});
 });

@@ -71,6 +71,11 @@ describe('transformTokenReference', () => {
 				.toBe('var(--wp--preset--border-radius--lg)');
 		});
 
+		it('resolves typography/fontFamilies/{slug} to preset font-family', () => {
+			expect(transformTokenReference('settings [static]', 'typography/fontFamilies/montserrat'))
+				.toBe('var(--wp--preset--font-family--montserrat)');
+		});
+
 		it('falls through to fallback for non-border-radius static vars', () => {
 			expect(transformTokenReference('settings [static]', 'layout/contentSize'))
 				.toBe('var(--wp--custom--layout--content-size)');
