@@ -406,7 +406,7 @@ describe('parseThemeJson', () => {
 
 	// --- settings [custom] ---
 
-	it('flattens settings.custom into settings [custom] entries', () => {
+	it('flattens settings.custom into settings [custom] entries, splitting color into settings [custom color]', () => {
 		const { entries } = parseThemeJson({
 			settings: {
 				custom: {
@@ -418,16 +418,45 @@ describe('parseThemeJson', () => {
 			},
 		});
 		expect(entries).toHaveLength(2);
-		// var() reference becomes a VarAliasRef so the alias can be re-linked in Figma
-		expect(entries.find(e => e.variableName === 'color/link/default')).toMatchObject({
-			collection: 'settings [custom]',
-			resolvedType: 'STRING',
+		// color var reference → settings [custom color] as COLOR
+		expect(entries.find(e => e.variableName === 'custom/color/link/default')).toMatchObject({
+			collection: 'settings [custom color]',
+			resolvedType: 'COLOR',
 			modes: { Default: { type: 'VAR_ALIAS', cssVar: 'var(--wp--preset--color--primary)' } },
 		});
+		// non-color value → settings [custom] as before
 		expect(entries.find(e => e.variableName === 'spacing/offset')).toMatchObject({
 			collection: 'settings [custom]',
 			resolvedType: 'FLOAT',
 			modes: { Default: 8 },
+		});
+	});
+
+	it('parses settings.custom.color hex values into settings [custom color] as COLOR entries', () => {
+		const { entries, warnings } = parseThemeJson({
+			settings: {
+				custom: {
+					color: {
+						warning: '#e5a000',
+						error: '#d54309',
+					},
+					gap: '16px',
+				},
+			},
+		});
+		expect(warnings).toHaveLength(0);
+		expect(entries).toHaveLength(3); // 2 custom colors + 1 custom gap
+		expect(entries.find(e => e.variableName === 'custom/color/warning')).toMatchObject({
+			collection: 'settings [custom color]',
+			resolvedType: 'COLOR',
+			modes: { Default: { r: expect.any(Number), g: expect.any(Number), b: expect.any(Number), a: 1 } },
+		});
+		expect(entries.find(e => e.variableName === 'custom/color/error')).toMatchObject({
+			collection: 'settings [custom color]',
+			resolvedType: 'COLOR',
+		});
+		expect(entries.find(e => e.variableName === 'gap')).toMatchObject({
+			collection: 'settings [custom]',
 		});
 	});
 

@@ -124,6 +124,45 @@ export function parseCustomValue(value: string): { resolvedType: 'FLOAT' | 'STRI
 
 // --- Nested object flattener for custom / styles ---
 
+/**
+ * Recursively flatten the settings.custom.color subtree into settings [custom color] entries.
+ * Values are parsed as colors (hex, rgb, transparent) or color var aliases. Non-color values
+ * are skipped with a warning.
+ */
+function flattenCustomColorToEntries(
+	obj: any,
+	path: string[],
+	entries: ImportEntry[],
+	warnings: string[],
+): void {
+	for (const key of Object.keys(obj)) {
+		const val = obj[key];
+		const currentPath = [...path, key];
+		if (val !== null && typeof val === 'object' && !Array.isArray(val)) {
+			flattenCustomColorToEntries(val, currentPath, entries, warnings);
+		} else if (typeof val === 'string') {
+			const trimmed = val.trim();
+			const colorOrAlias = parseColorOrAlias(trimmed);
+			if (colorOrAlias) {
+				entries.push({
+					collection: 'settings [custom color]',
+					variableName: currentPath.join('/'),
+					resolvedType: 'COLOR',
+					modes: { Default: colorOrAlias },
+				});
+			} else {
+				warnings.push(
+					`settings [custom color]: Skipping "${currentPath.join('/')}" — "${trimmed}" is not a valid color or CSS var reference.`
+				);
+			}
+		} else {
+			warnings.push(
+				`settings [custom color]: Skipping "${currentPath.join('/')}" — unsupported value type (${typeof val}).`
+			);
+		}
+	}
+}
+
 function flattenToEntries(
 	obj: any,
 	path: string[],
@@ -331,10 +370,20 @@ export function parseThemeJson(theme: any): ParseResult {
 		}
 	}
 
+	// --- settings [custom color] ---
+	// settings.custom.color.* → separate COLOR collection so color swatches get the right type
+	// and stay in their own Figma collection (settings [custom color]).
+	const customColor = theme.settings?.custom?.color;
+	if (customColor && typeof customColor === 'object' && !Array.isArray(customColor)) {
+		flattenCustomColorToEntries(customColor, ['custom', 'color'], entries, warnings);
+	}
+
 	// --- settings [custom] ---
+	// Everything in settings.custom except the color subtree (handled above).
 	const custom = theme.settings?.custom;
 	if (custom && typeof custom === 'object' && !Array.isArray(custom)) {
-		flattenToEntries(custom, [], 'settings [custom]', entries, warnings);
+		const { color: _color, ...customWithoutColor } = custom;
+		flattenToEntries(customWithoutColor, [], 'settings [custom]', entries, warnings);
 	}
 
 	// --- styles ---
