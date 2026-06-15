@@ -537,17 +537,18 @@ describe('parseThemeJson', () => {
 		});
 		expect(warnings).toHaveLength(0);
 		expect(entries).toHaveLength(2);
+		// Only the first font name is stored — no cascade, no quotes
 		expect(entries[0]).toMatchObject({
 			collection: 'settings [static]',
 			variableName: 'typography/fontFamilies/montserrat',
 			resolvedType: 'STRING',
-			modes: { Default: 'Montserrat, sans-serif' },
+			modes: { Default: 'Montserrat' },
 		});
 		expect(entries[1]).toMatchObject({
 			collection: 'settings [static]',
 			variableName: 'typography/fontFamilies/open-sans',
 			resolvedType: 'STRING',
-			modes: { Default: 'Open Sans, sans-serif' },
+			modes: { Default: 'Open Sans' },
 		});
 	});
 
@@ -998,7 +999,7 @@ describe('writeImportEntries', () => {
 	it('creates a !-theme-tokens stub when a --theme-- VarAliasRef cannot be resolved from a library', async () => {
 		// settings [custom]/body/typography/fontWeight = var(--theme--type--weight--regular)
 		// The theme library isn't connected. The plugin should create:
-		//   !-theme-tokens/theme/type/weight/regular  (STRING stub, value '')
+		//   !-theme-tokens/theme/type/weight/regular  (STRING stub, value 'regular')
 		// so that body/typography/fontWeight can alias it in Pass 1.
 
 		const STUB_ID = 'stub-theme-var-id';
@@ -1046,6 +1047,8 @@ describe('writeImportEntries', () => {
 		expect(mockFigma.variables.createVariable).toHaveBeenCalledWith(
 			'theme/type/weight/regular', expect.anything(), 'STRING'
 		);
+		// Stub value set to the slug so Figma doesn't show "String value" placeholder
+		expect(stubVar.setValueForMode).toHaveBeenCalledWith('m1', 'regular');
 		// fontWeight variable IS created and aliases the stub
 		expect(mockFigma.variables.createVariable).toHaveBeenCalledWith(
 			'body/typography/fontWeight', expect.anything(), 'STRING'

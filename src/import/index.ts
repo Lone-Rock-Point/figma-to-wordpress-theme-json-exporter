@@ -360,12 +360,17 @@ export function parseThemeJson(theme: any): ParseResult {
 				continue;
 			}
 			if (typeof item.fontFamily === 'string') {
-				entries.push({
-					collection: 'settings [static]',
-					variableName: `typography/fontFamilies/${item.slug}`,
-					resolvedType: 'STRING',
-					modes: { Default: item.fontFamily },
-				});
+				// Strip the CSS font-family cascade to just the first name
+				// e.g. "Montserrat, sans-serif" → "Montserrat"
+				const firstName = item.fontFamily.split(',')[0].trim().replace(/^["']|["']$/g, '');
+				if (firstName) {
+					entries.push({
+						collection: 'settings [static]',
+						variableName: `typography/fontFamilies/${item.slug}`,
+						resolvedType: 'STRING',
+						modes: { Default: firstName },
+					});
+				}
 			}
 		}
 	}
@@ -868,10 +873,17 @@ export async function writeImportEntries(entries: ImportEntry[]): Promise<WriteR
 					if (v) existingThemeVarNames.add(v.name);
 				}
 
+				const defaultModeId = themeCollection.modes[0]?.modeId;
 				for (const [, varName] of unresolvable) {
 					if (!existingThemeVarNames.has(varName)) {
 						try {
-							figma.variables.createVariable(varName, themeCollection, 'STRING');
+							const stub = figma.variables.createVariable(varName, themeCollection, 'STRING');
+							// Use the last path segment as the stub value so Figma doesn't
+							// show "String value" placeholder (e.g. "bold", "regular").
+							const slug = varName.split('/').pop() ?? '';
+							if (defaultModeId && slug) {
+								try { stub.setValueForMode(defaultModeId, slug); } catch (_) {}
+							}
 							created++;
 						} catch (err) {
 							warnings.push(`Could not create stub "${varName}" in ${THEME_COLLECTION}: ${err instanceof Error ? err.message : String(err)}`);

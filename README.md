@@ -2,7 +2,7 @@
 
 [![Support Level](https://img.shields.io/badge/support-beta-blueviolet.svg)](#support-level) [![MIT License](https://img.shields.io/github/license/10up/10up-block-theme-json-export.svg)](https://github.com/10up/figma-to-wordpress-theme-json-exporter/blob/develop/LICENSE.md)
 
-> This Figma plugin exports named variable collections to the correct sections of a WordPress theme.json file, and imports theme.json color palettes back into Figma as variables — keeping your design tokens and theme in sync.
+> This Figma plugin exports named variable collections to the correct sections of a WordPress theme.json file, and imports theme.json values back into Figma as variables — keeping your design tokens and theme in sync.
 
 This plugin is optimized for use with [CivicPress](https://civicpress.us/) — a WordPress block theme built for government and civic organizations. It works seamlessly with the [civicpress](https://github.com/Lone-Rock-Point/civicpress) and [civicpress-child](https://github.com/Lone-Rock-Point/civicpress-child) themes.
 
@@ -11,15 +11,15 @@ This plugin is optimized for use with [CivicPress](https://civicpress.us/) — a
 The plugin works in both directions:
 
 - **Export** — reads six named variable collections from your Figma document and maps them to their corresponding locations in `theme.json`. Only the keys defined in Figma are updated; everything else in your existing `theme.json` is preserved.
-- **Import** — reads a `theme.json` and syncs its color palette and custom values back into Figma variable collections, creating or updating variables as needed. CSS `var()` references are imported as Figma variable aliases pointing at the matching token.
+- **Import** — reads a `theme.json` and syncs its color palette, typography, spacing, border, shadow, font families, custom color tokens, custom values, and styles back into Figma variable collections. Creates or updates variables as needed. CSS `var()` references are imported as Figma variable aliases pointing at the matching token.
 
-| Collection name | Maps to |
+| Collection name | theme.json source (import) / destination (export) |
 |----------------|---------|
 | `settings [color]` | `settings.color.palette` |
 | `settings [fluid]` | `settings.typography.fontSizes` and `settings.spacing.spacingSizes` |
-| `settings [static]` | `settings.border`, `settings.dimensions`, `settings.shadow`, and other scalar settings |
-| `settings [custom color]` | `settings.custom.*` |
-| `settings [custom]` | `settings.custom.*` |
+| `settings [static]` | `settings.border`, `settings.dimensions`, `settings.shadow`, `settings.typography.fontFamilies`, and other scalar settings |
+| `settings [custom color]` | `settings.custom.color.*` |
+| `settings [custom]` | `settings.custom.*` (excluding `color`) |
 | `styles` | `styles.*` |
 
 ## Installation
@@ -49,7 +49,7 @@ The plugin has two commands, both available under **Menu > Plugins > Development
 
 ### Import from theme.json
 
-Import reads a `theme.json` and syncs its color palette and custom values back into Figma variable collections, creating or updating variables as needed.
+Import reads a `theme.json` and creates or updates the corresponding Figma variable collections. All major theme.json sections are supported: color palette, font sizes, spacing sizes, border radii, aspect ratios, shadow presets, font families, custom color tokens, custom values, and styles.
 
 1. Go to **Menu > Plugins > Development > WordPress Theme.json Export > Import from theme.json**
 2. Paste your `theme.json` content into the text area
@@ -69,12 +69,23 @@ The preview compares every incoming value against what's already in Figma and sh
 
 The **Import Variables** button only appears when there is at least one NEW or UPDATED variable, and its label reflects the actionable count (e.g. `Import Variables (8 new, 3 updated)`).
 
-#### CSS variable references and USWDS aliases
+Alias values in the preview are shown as `→ variable/path` (e.g. `→ palette/primary`) rather than the raw CSS var string, so you can see at a glance what each token will point to.
 
-Color palette entries whose value is a CSS `var()` reference (e.g. `"color": "var(--token--color--orange-50v)"`) are imported as Figma **variable aliases** rather than hard-coded colors. The plugin searches both local collections and connected team libraries to resolve the alias target.
+#### CSS variable references and alias resolution
 
-- If the target variable is found locally or in an enabled team library it is linked as a `VARIABLE_ALIAS`.
-- If the library containing the target variable is not enabled in the current Figma file, the variable is skipped with a warning: *"Enable the library that contains this variable in your Figma file, then re-import."*
+When an entry's value is a CSS `var()` reference, the plugin tries to resolve it as a Figma variable alias. The resolution strategy depends on where the variable lives:
+
+**Color palette (`settings [color]`)**
+- If the target is found locally or in an enabled team library, it is linked as a `VARIABLE_ALIAS`.
+- If the target cannot be resolved, the variable is **skipped** (no orphaned color swatch is created). A warning appears: *"Enable the library that contains this variable in your Figma file, then re-import."*
+
+**All other collections (`settings [custom color]`, `settings [custom]`, `styles`, etc.)**
+- WordPress-namespace refs (`var(--wp--...)`) that point to variables being created in the same import batch are deferred and resolved in a second pass after all variables have been written.
+- External library refs (`var(--token--...)`, `var(--theme--...)`, etc.) that can't be resolved in the current file are handled gracefully: the variable is created with a safe default value so downstream aliases can reference it. A warning is emitted if the alias couldn't be set.
+
+**`--theme--` references and `!-theme-tokens` stubs**
+
+If your theme.json references design-system tokens via `var(--theme--...)` (e.g. font weights, type scales from a separate token library) and that library isn't connected to your Figma file, the plugin automatically creates a local **`!-theme-tokens`** collection with stub STRING variables for each referenced token. For example, `var(--theme--type--weight--bold)` produces a `!-theme-tokens/theme/type/weight/bold` variable with the value `"bold"`. This keeps the alias chain intact so your `settings [custom]` and `styles` variables can reference these stubs while you work. Connect the token library later and re-import to replace the stubs with live aliases.
 
 > **Note:** To import USWDS token aliases, the USWDS variable library must be enabled in your Figma file via **Assets > Libraries**.
 
@@ -114,15 +125,30 @@ Array variables use these exact paths:
 | `border/radius-sizes/{slug}` | `settings.border.radiusSizes` | `size` |
 | `dimensions/aspect-ratios/{slug}` | `settings.dimensions.aspectRatios` | `ratio` |
 | `shadow/presets/{slug}` | `settings.shadow.presets` | `shadow` |
+| `typography/fontFamilies/{slug}` | `settings.typography.fontFamilies` | `fontFamily` |
 
 Aspect ratio slugs are written with hyphens (`16-9`) and values as fractions (`16/9`). Common ratios get human-readable names automatically (Wide, Square, Standard, etc.).
 
-### `settings [custom color]` and `settings [custom]`
+Font family variables store only the primary font name (e.g. `"Montserrat"`, not `"Montserrat, sans-serif"`). On import, the full CSS font-family stack from `theme.json` is stripped to just the first name.
 
-Variable path becomes the key path under `settings.custom`. For example:
+### `settings [custom color]`
+
+Variables under `settings.custom.color` in `theme.json` are imported here as COLOR variables. Variable path becomes the key path prefixed with `custom/color/`:
 
 ```
-color/link/default  →  settings.custom.color.link.default
+custom/color/warning         →  settings.custom.color.warning
+custom/color/link/default    →  settings.custom.color.link.default
+```
+
+Hex colors, `rgb()`, and CSS `var()` color references are all supported.
+
+### `settings [custom]`
+
+All other values under `settings.custom` (excluding `color`) are imported here as STRING or FLOAT variables. Variable path becomes the key path under `settings.custom`:
+
+```
+body/typography/fontWeight  →  settings.custom.body.typography.fontWeight
+spacing/offset              →  settings.custom.spacing.offset
 ```
 
 Aliases to `!-usa/` collections resolve to `var(--token--category--name)`.  
@@ -142,7 +168,11 @@ elements/link/:hover/color/text  →  styles.elements.link.:hover.color.text
 |------------------------|-------------|
 | `!-usa/color/blue/5v` | `var(--token--color--blue-5v)` |
 | `!-theme-tokens/theme/color/accent` | `var(--theme--color--accent)` |
-| Any other collection | `var(--wp--custom--path--to--var)` |
+| `settings [color]/palette/{slug}` | `var(--wp--preset--color--{slug})` |
+| `settings [static]/typography/fontFamilies/{slug}` | `var(--wp--preset--font-family--{slug})` |
+| `settings [fluid]/font-size/{slug}` | `var(--wp--preset--font-size--{slug})` |
+| `settings [custom]/*` | `var(--wp--custom--path--to--var)` |
+| `settings [custom color]/*` | `var(--wp--custom--color--path)` |
 
 ## Plugin Interface
 
@@ -153,7 +183,7 @@ elements/link/:hover/color/text  →  styles.elements.link.:hover.color.text
 
 **Import panel**
 - **Resizable**: Drag the bottom-right corner to resize
-- **Diff preview**: Color-coded status badges (NEW / UPDATED / = / ⚠) with inline old→new comparison for changed values
+- **Diff preview**: Color-coded status badges (NEW / UPDATED / = / ⚠) with inline old→new comparison for changed values; alias targets shown as `→ variable/path`
 - **Actionable import button**: Only appears when there are variables to create or update; label shows the count
 
 ## Development
