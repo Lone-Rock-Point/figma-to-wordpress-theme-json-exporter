@@ -174,6 +174,12 @@ const ARRAY_SETTINGS: Record<string, { settingsPath: string[]; valueKey: string;
 		valueKey: 'size',
 		formatValue: (v: number) => `${v}px`,
 	},
+	// camelCase variant: border/radiusSizes/slug (lowercased to 'border/radiussizes' for lookup)
+	'border/radiussizes': {
+		settingsPath: ['border', 'radiusSizes'],
+		valueKey: 'size',
+		formatValue: (v: number) => `${v}px`,
+	},
 	'dimensions/aspect-ratios': {
 		settingsPath: ['dimensions', 'aspectRatios'],
 		valueKey: 'ratio',

@@ -191,10 +191,10 @@ describe('parseCustomValue', () => {
 // ─────────────────────────────────────────────────────────────────────────────
 
 describe('cssVarToDisplayName', () => {
-	it('maps preset color vars to palette/{slug}', () => {
-		expect(cssVarToDisplayName('var(--wp--preset--color--primary)')).toBe('palette/primary');
-		expect(cssVarToDisplayName('var(--wp--preset--color--primary-lighter)')).toBe('palette/primary-lighter');
-		expect(cssVarToDisplayName('var(--wp--preset--color--base-minus-1)')).toBe('palette/base-minus-1');
+	it('maps preset color vars to color/palette/{slug}', () => {
+		expect(cssVarToDisplayName('var(--wp--preset--color--primary)')).toBe('color/palette/primary');
+		expect(cssVarToDisplayName('var(--wp--preset--color--primary-lighter)')).toBe('color/palette/primary-lighter');
+		expect(cssVarToDisplayName('var(--wp--preset--color--base-minus-1)')).toBe('color/palette/base-minus-1');
 	});
 
 	it('maps preset font-family vars to typography/fontFamilies/{slug}', () => {
@@ -202,17 +202,17 @@ describe('cssVarToDisplayName', () => {
 		expect(cssVarToDisplayName('var(--wp--preset--font-family--open-sans)')).toBe('typography/fontFamilies/open-sans');
 	});
 
-	it('maps preset font-size vars to font-size/{slug}', () => {
-		expect(cssVarToDisplayName('var(--wp--preset--font-size--x-large)')).toBe('font-size/x-large');
-		expect(cssVarToDisplayName('var(--wp--preset--font-size--normal)')).toBe('font-size/normal');
+	it('maps preset font-size vars to typography/fontSizes/{slug}', () => {
+		expect(cssVarToDisplayName('var(--wp--preset--font-size--x-large)')).toBe('typography/fontSizes/x-large');
+		expect(cssVarToDisplayName('var(--wp--preset--font-size--normal)')).toBe('typography/fontSizes/normal');
 	});
 
 	it('maps preset spacing vars to spacing/{slug}', () => {
 		expect(cssVarToDisplayName('var(--wp--preset--spacing--lg)')).toBe('spacing/lg');
 	});
 
-	it('maps preset border-radius vars to border/radius-sizes/{slug}', () => {
-		expect(cssVarToDisplayName('var(--wp--preset--border-radius--sm)')).toBe('border/radius-sizes/sm');
+	it('maps preset border-radius vars to border/radiusSizes/{slug}', () => {
+		expect(cssVarToDisplayName('var(--wp--preset--border-radius--sm)')).toBe('border/radiusSizes/sm');
 	});
 
 	it('maps custom vars to camelCase paths', () => {
@@ -273,7 +273,7 @@ describe('parseThemeJson', () => {
 		expect(entries).toHaveLength(2);
 		expect(entries[0]).toMatchObject({
 			collection: 'settings [color]',
-			variableName: 'palette/primary',
+			variableName: 'color/palette/primary',
 			resolvedType: 'COLOR',
 			modes: { Default: { r: 1, g: 0, b: 0, a: 1 } },
 		});
@@ -295,7 +295,7 @@ describe('parseThemeJson', () => {
 		expect(entries).toHaveLength(1);
 		expect(entries[0]).toMatchObject({
 			collection: 'settings [color]',
-			variableName: 'palette/primary',
+			variableName: 'color/palette/primary',
 			resolvedType: 'COLOR',
 			modes: { Default: { type: 'VAR_ALIAS', cssVar: 'var(--token--color--blue-50)' } },
 		});
@@ -316,7 +316,7 @@ describe('parseThemeJson', () => {
 		expect(warnings).toHaveLength(0);
 		expect(entries[0]).toMatchObject({
 			collection: 'settings [fluid]',
-			variableName: 'font-size/xl',
+			variableName: 'typography/fontSizes/xl',
 			resolvedType: 'FLOAT',
 			modes: { Desktop: 36, Mobile: 24 },
 		});
@@ -374,7 +374,7 @@ describe('parseThemeJson', () => {
 		});
 		expect(entries[0]).toMatchObject({
 			collection: 'settings [static]',
-			variableName: 'border/radius-sizes/sm',
+			variableName: 'border/radiusSizes/sm',
 			resolvedType: 'FLOAT',
 			modes: { Default: 4 },
 		});
@@ -629,7 +629,7 @@ describe('writeImportEntries', () => {
 	});
 
 	const makeVariable = (overrides: Record<string, any> = {}) => ({
-		name: 'palette/primary',
+		name: 'color/palette/primary',
 		resolvedType: 'COLOR',
 		setValueForMode: vi.fn(),
 		...overrides,
@@ -647,14 +647,14 @@ describe('writeImportEntries', () => {
 
 		const entries: ImportEntry[] = [{
 			collection: 'settings [color]',
-			variableName: 'palette/primary',
+			variableName: 'color/palette/primary',
 			resolvedType: 'COLOR',
 			modes: { Default: { r: 1, g: 0, b: 0, a: 1 } },
 		}];
 
 		const result = await writeImportEntries(entries);
 
-		expect(mockFigma.variables.createVariable).toHaveBeenCalledWith('palette/primary', collection, 'COLOR');
+		expect(mockFigma.variables.createVariable).toHaveBeenCalledWith('color/palette/primary', collection, 'COLOR');
 		expect(newVar.setValueForMode).toHaveBeenCalledWith('m1', { r: 1, g: 0, b: 0, a: 1 });
 		expect(result).toMatchObject({ created: 1, updated: 0, skipped: 0 });
 	});
@@ -667,7 +667,7 @@ describe('writeImportEntries', () => {
 
 		const entries: ImportEntry[] = [{
 			collection: 'settings [color]',
-			variableName: 'palette/primary',
+			variableName: 'color/palette/primary',
 			resolvedType: 'COLOR',
 			modes: { Default: { r: 0, g: 0, b: 1, a: 1 } },
 		}];
@@ -679,7 +679,7 @@ describe('writeImportEntries', () => {
 		expect(result).toMatchObject({ created: 0, updated: 1, skipped: 0 });
 	});
 
-	it('skips a variable when the existing type does not match', async () => {
+	it('downgrades COLOR→STRING when the existing variable is STRING (e.g. transparent stored as CSS keyword)', async () => {
 		const existingVar = makeVariable({ resolvedType: 'STRING' }); // existing is STRING
 		const collection = makeCollection({ variableIds: ['v1'] });
 		mockFigma.variables.getLocalVariableCollectionsAsync.mockResolvedValue([collection]);
@@ -687,9 +687,30 @@ describe('writeImportEntries', () => {
 
 		const entries: ImportEntry[] = [{
 			collection: 'settings [color]',
-			variableName: 'palette/primary',
-			resolvedType: 'COLOR', // import wants COLOR
+			variableName: 'color/palette/primary',
+			resolvedType: 'COLOR', // import parsed a color value
 			modes: { Default: { r: 1, g: 0, b: 0, a: 1 } },
+		}];
+
+		const result = await writeImportEntries(entries);
+
+		// Should write '#ff0000' (CSS string) rather than skipping with a type-mismatch warning.
+		expect(existingVar.setValueForMode).toHaveBeenCalledWith('m1', '#ff0000');
+		expect(result).toMatchObject({ created: 0, updated: 1, skipped: 0 });
+		expect(result.warnings.some(w => w.includes('does not match'))).toBe(false);
+	});
+
+	it('skips a variable when the existing type genuinely does not match (e.g. FLOAT vs STRING)', async () => {
+		const existingVar = makeVariable({ resolvedType: 'STRING' }); // existing is STRING
+		const collection = makeCollection({ variableIds: ['v1'] });
+		mockFigma.variables.getLocalVariableCollectionsAsync.mockResolvedValue([collection]);
+		mockFigma.variables.getVariableByIdAsync.mockResolvedValue(existingVar);
+
+		const entries: ImportEntry[] = [{
+			collection: 'settings [color]',
+			variableName: 'color/palette/primary', // matches the mock variable name
+			resolvedType: 'FLOAT', // import wants FLOAT but existing is STRING
+			modes: { Default: 4 },
 		}];
 
 		const result = await writeImportEntries(entries);
@@ -708,7 +729,7 @@ describe('writeImportEntries', () => {
 
 		const entries: ImportEntry[] = [{
 			collection: 'settings [color]',
-			variableName: 'palette/primary',
+			variableName: 'color/palette/primary',
 			resolvedType: 'COLOR',
 			modes: { Default: { r: 1, g: 0, b: 0, a: 1 } },
 		}];
@@ -736,7 +757,7 @@ describe('writeImportEntries', () => {
 		// Import only provides Default mode
 		const entries: ImportEntry[] = [{
 			collection: 'settings [color]',
-			variableName: 'palette/primary',
+			variableName: 'color/palette/primary',
 			resolvedType: 'COLOR',
 			modes: { Default: { r: 1, g: 0, b: 0, a: 1 } },
 		}];
@@ -756,7 +777,7 @@ describe('writeImportEntries', () => {
 
 		const entries: ImportEntry[] = [{
 			collection: 'settings [color]',
-			variableName: 'palette/primary',
+			variableName: 'color/palette/primary',
 			resolvedType: 'COLOR',
 			modes: { Default: { r: 1, g: 0, b: 0, a: 1 } },
 		}];
@@ -774,7 +795,7 @@ describe('writeImportEntries', () => {
 
 		const entries: ImportEntry[] = [{
 			collection: 'settings [color]',
-			variableName: 'palette/bad',
+			variableName: 'color/palette/bad',
 			resolvedType: 'COLOR',
 			modes: { Default: { r: 1, g: 0, b: 0, a: 1 } },
 		}];
@@ -799,7 +820,7 @@ describe('writeImportEntries', () => {
 			addMode: vi.fn(),
 		};
 		const uswdsVar = { id: 'uswds-v1', name: 'color/orange-50v', resolvedType: 'COLOR', setValueForMode: vi.fn() };
-		const newVar = makeVariable({ name: 'palette/orange' });
+		const newVar = makeVariable({ name: 'color/palette/orange' });
 
 		mockFigma.variables.getLocalVariableCollectionsAsync.mockResolvedValue([colorCollection, uswdsCollection]);
 		mockFigma.variables.getVariableByIdAsync.mockImplementation(async (id: string) =>
@@ -811,7 +832,7 @@ describe('writeImportEntries', () => {
 
 		const aliasEntry: ImportEntry = {
 			collection: 'settings [color]',
-			variableName: 'palette/orange',
+			variableName: 'color/palette/orange',
 			resolvedType: 'COLOR',
 			modes: { Default: { type: 'VAR_ALIAS', cssVar: 'var(--token--color--orange-50v)' } as VarAliasRef },
 		};
@@ -824,7 +845,7 @@ describe('writeImportEntries', () => {
 
 	it('resolves a VarAliasRef from a team library when not found locally', async () => {
 		const colorCollection = makeCollection({ variableIds: [] });
-		const newVar = makeVariable({ name: 'palette/orange' });
+		const newVar = makeVariable({ name: 'color/palette/orange' });
 
 		// No local USWDS collection
 		mockFigma.variables.getLocalVariableCollectionsAsync.mockResolvedValue([colorCollection]);
@@ -842,7 +863,7 @@ describe('writeImportEntries', () => {
 
 		const aliasEntry: ImportEntry = {
 			collection: 'settings [color]',
-			variableName: 'palette/orange',
+			variableName: 'color/palette/orange',
 			resolvedType: 'COLOR',
 			modes: { Default: { type: 'VAR_ALIAS', cssVar: 'var(--token--color--orange-50v)' } as VarAliasRef },
 		};
@@ -982,7 +1003,7 @@ describe('writeImportEntries', () => {
 
 		const aliasEntry: ImportEntry = {
 			collection: 'settings [color]',
-			variableName: 'palette/orange',
+			variableName: 'color/palette/orange',
 			resolvedType: 'COLOR',
 			modes: { Default: { type: 'VAR_ALIAS', cssVar: 'var(--token--color--orange-50v)' } as VarAliasRef },
 		};

@@ -232,7 +232,7 @@ export function parseThemeJson(theme: any): ParseResult {
 			if (colorOrAlias) {
 				entries.push({
 					collection: 'settings [color]',
-					variableName: `palette/${item.slug}`,
+					variableName: `color/palette/${item.slug}`,
 					resolvedType: 'COLOR',
 					modes: { Default: colorOrAlias },
 				});
@@ -262,7 +262,7 @@ export function parseThemeJson(theme: any): ParseResult {
 			if (mobile !== null) modes.Mobile = mobile;
 			entries.push({
 				collection: 'settings [fluid]',
-				variableName: `font-size/${item.slug}`,
+				variableName: `typography/fontSizes/${item.slug}`,
 				resolvedType: 'FLOAT',
 				modes,
 			});
@@ -306,7 +306,7 @@ export function parseThemeJson(theme: any): ParseResult {
 			}
 			entries.push({
 				collection: 'settings [static]',
-				variableName: `border/radius-sizes/${item.slug}`,
+				variableName: `border/radiusSizes/${item.slug}`,
 				resolvedType: 'FLOAT',
 				modes: { Default: value },
 			});
@@ -456,7 +456,7 @@ export function cssVarToDisplayName(cssVar: string): string {
 
 	// --wp--preset--color--{slug}
 	const colorM = token.match(/^--wp--preset--color--(.+)$/);
-	if (colorM) return `palette/${colorM[1]}`;
+	if (colorM) return `color/palette/${colorM[1]}`;
 
 	// --wp--preset--font-family--{slug}
 	const ffM = token.match(/^--wp--preset--font-family--(.+)$/);
@@ -464,7 +464,7 @@ export function cssVarToDisplayName(cssVar: string): string {
 
 	// --wp--preset--font-size--{slug}
 	const fsM = token.match(/^--wp--preset--font-size--(.+)$/);
-	if (fsM) return `font-size/${fsM[1]}`;
+	if (fsM) return `typography/fontSizes/${fsM[1]}`;
 
 	// --wp--preset--spacing--{slug}
 	const spM = token.match(/^--wp--preset--spacing--(.+)$/);
@@ -472,7 +472,7 @@ export function cssVarToDisplayName(cssVar: string): string {
 
 	// --wp--preset--border-radius--{slug}
 	const brM = token.match(/^--wp--preset--border-radius--(.+)$/);
-	if (brM) return `border/radius-sizes/${brM[1]}`;
+	if (brM) return `border/radiusSizes/${brM[1]}`;
 
 	// --wp--custom--{path}: split on '--', convert each kebab segment to camelCase, join with '/'
 	// e.g. body--typography--font-family → body/typography/fontFamily
@@ -496,14 +496,20 @@ export function cssVarToDisplayName(cssVar: string): string {
 
 // --- Diff helpers ---
 
+/** Convert a FigmaColor to its CSS string representation. */
+function figmaColorToCssString(c: FigmaColor): string {
+	if (c.a === 0) return 'transparent';
+	const h = (n: number) => Math.round(n * 255).toString(16).padStart(2, '0');
+	return c.a >= 1 ? `#${h(c.r)}${h(c.g)}${h(c.b)}` : `#${h(c.r)}${h(c.g)}${h(c.b)}${h(c.a)}`;
+}
+
 /** Convert an incoming ImportModeValue to a display string. */
 function importValueToDisplay(value: ImportModeValue, resolvedType: string, modeName: string): string {
 	if (isVarAliasRef(value)) return value.cssVar;
-	if (resolvedType === 'COLOR' && value !== null && typeof value === 'object' && 'r' in value) {
-		const c = value as FigmaColor;
-		if (c.a === 0) return 'transparent';
-		const h = (n: number) => Math.round(n * 255).toString(16).padStart(2, '0');
-		return c.a >= 1 ? `#${h(c.r)}${h(c.g)}${h(c.b)}` : `#${h(c.r)}${h(c.g)}${h(c.b)}${h(c.a)}`;
+	// Convert FigmaColor to CSS string regardless of resolvedType — handles the case
+	// where a COLOR entry targets a STRING variable and effectiveResolvedType is downgraded.
+	if (value !== null && typeof value === 'object' && 'r' in value) {
+		return figmaColorToCssString(value as FigmaColor);
 	}
 	if (resolvedType === 'FLOAT' && typeof value === 'number') {
 		return modeName.toLowerCase() === 'vw' ? `${value}vw` : `${value}px`;
@@ -629,6 +635,13 @@ export async function diffImportEntries(entries: ImportEntry[]): Promise<DiffRes
 			}
 			diffs.push({ collection: entry.collection, variableName: entry.variableName, resolvedType: effectiveResolvedType, status: 'new', modes });
 			continue;
+		}
+
+		// COLOR→STRING downgrade: if the import resolved a color value (e.g. 'transparent' →
+		// FigmaColor {r:0,g:0,b:0,a:0}) but the existing Figma variable is STRING type,
+		// downgrade so the preview shows the CSS string and doesn't flag a type-mismatch.
+		if (effectiveResolvedType === 'COLOR' && existingVar.resolvedType === 'STRING') {
+			effectiveResolvedType = 'STRING';
 		}
 
 		if (existingVar.resolvedType !== effectiveResolvedType) {
@@ -1040,6 +1053,19 @@ export async function writeImportEntries(entries: ImportEntry[]): Promise<WriteR
 
 			let variable = existingVars.get(entry.variableName);
 			const isNew = !variable;
+
+			// COLOR→STRING downgrade: if the import parsed a color (e.g. 'transparent' →
+			// {r:0,g:0,b:0,a:0}) but the existing Figma variable is STRING type, convert
+			// the FigmaColor values in resolvedModes to their CSS string representation so
+			// we can write the update without hitting a type-mismatch error.
+			if (!isNew && effectiveResolvedType === 'COLOR' && variable!.resolvedType === 'STRING') {
+				effectiveResolvedType = 'STRING';
+				for (const [key, val] of Object.entries(resolvedModes)) {
+					if (val !== null && typeof val === 'object' && 'r' in val) {
+						resolvedModes[key] = figmaColorToCssString(val as FigmaColor);
+					}
+				}
+			}
 
 			if (isNew) {
 				try {
